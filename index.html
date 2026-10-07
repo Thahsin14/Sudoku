@@ -19,8 +19,8 @@ select,button{font:inherit;color:var(--ink);background:var(--panel);border:1px s
 button:hover,select:hover{border-color:var(--thick)}
 :focus-visible{outline:3px solid var(--user);outline-offset:1px}
 .bar button{flex:1}
-#board{display:grid;grid-template-columns:repeat(9,1fr);aspect-ratio:1;background:var(--panel);border:3px solid var(--thick);touch-action:none;user-select:none}
-.c{position:relative;display:flex;align-items:center;justify-content:center;border:0;border-radius:0;padding:0;background:transparent;font-size:clamp(1.2rem,6vw,1.9rem);border-right:1px solid var(--line);border-bottom:1px solid var(--line);color:var(--user)}
+#board{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));grid-template-rows:repeat(9,minmax(0,1fr));width:100%;aspect-ratio:1;background:var(--panel);border:3px solid var(--thick);touch-action:none;user-select:none}
+.c{position:relative;min-width:0;min-height:0;overflow:hidden;display:flex;align-items:center;justify-content:center;border:0;border-radius:0;padding:0;background:transparent;font-size:clamp(1.2rem,6vw,1.9rem);border-right:1px solid var(--line);border-bottom:1px solid var(--line);color:var(--user)}
 .c:nth-child(9n){border-right:0}
 .c:nth-child(n+73){border-bottom:0}
 .c:nth-child(3n):not(:nth-child(9n)){border-right:2px solid var(--thick)}
@@ -30,7 +30,7 @@ button:hover,select:hover{border-color:var(--thick)}
 .c.s2{background:var(--same)}
 .c.sel{background:var(--sel);box-shadow:inset 0 0 0 2px var(--user)}
 .c.bad{color:var(--bad);background:var(--badbg)}
-.notes{pointer-events:none;display:grid;grid-template-columns:repeat(3,1fr);width:100%;height:100%;font-size:clamp(.5rem,2.4vw,.75rem);color:var(--muted);line-height:1;padding:2px}
+.notes{pointer-events:none;position:absolute;inset:0;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);font-size:clamp(.5rem,2.4vw,.75rem);color:var(--muted);line-height:1;padding:2px}
 .notes span{display:flex;align-items:center;justify-content:center}
 #pad{display:grid;grid-template-columns:repeat(9,1fr);gap:6px;margin-top:14px}
 #pad button{padding:10px 0;font-size:1.3rem}
@@ -45,8 +45,12 @@ button:hover,select:hover{border-color:var(--thick)}
 </head>
 <body>
 <main>
-  <header><h1>Sudoku</h1><span id="timer" aria-label="Elapsed time">0:00</span></header>
+  <header><h1 id="title">Sudoku</h1><span id="timer" aria-label="Elapsed time">0:00</span></header>
   <div class="bar">
+    <select id="variant" aria-label="Variant">
+      <option value="classic">Classic</option>
+      <option value="knight">Knight</option>
+    </select>
     <select id="diff" aria-label="Difficulty">
       <option value="40">Easy</option>
       <option value="32" selected>Medium</option>
@@ -69,14 +73,28 @@ button:hover,select:hover{border-color:var(--thick)}
 (() => {
   const $ = id => document.getElementById(id);
   const boardEl = $('board'), msgEl = $('msg'), timerEl = $('timer');
-  let sol, given, cur, notes, sel = -1, multi = new Set(), dragging = false, noteMode = false, secs = 0, tick = null, won = false;
+  let sol, given, cur, notes, knight = false, sel = -1, multi = new Set(), dragging = false, noteMode = false, secs = 0, tick = null, won = false;
 
   const rnd = n => Math.floor(Math.random() * n);
   const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = rnd(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
   const row = i => Math.floor(i / 9), col = i => i % 9;
   const box = i => Math.floor(row(i) / 3) * 3 + Math.floor(col(i) / 3);
-  const peers = i => { const s = []; for (let j = 0; j < 81; j++) if (j !== i && (row(j) === row(i) || col(j) === col(i) || box(j) === box(i))) s.push(j); return s; };
-  const PEERS = Array.from({ length: 81 }, (_, i) => peers(i));
+  // Knight variant: cells a chess knight's move apart can't share a digit.
+  const buildPeers = kn => Array.from({ length: 81 }, (_, i) => {
+    const out = [];
+    for (let j = 0; j < 81; j++) {
+      if (j === i) continue;
+      const dr = Math.abs(row(j) - row(i)), dc = Math.abs(col(j) - col(i));
+      if (row(j) === row(i) || col(j) === col(i) || box(j) === box(i) || (kn && dr * dc === 2)) out.push(j);
+    }
+    return out;
+  });
+  let PEERS = buildPeers(false);
+  const setMode = kn => {
+    knight = kn; PEERS = buildPeers(kn);
+    $('variant').value = kn ? 'knight' : 'classic';
+    $('title').textContent = kn ? 'Knight Sudoku' : 'Sudoku';
+  };
 
   function candidates(g, i) {
     const used = new Set(PEERS[i].map(j => g[j]));
@@ -239,7 +257,7 @@ button:hover,select:hover{border-color:var(--thick)}
   function save() {
     if (won) return;
     try {
-      localStorage.setItem('sudoku', JSON.stringify({ sol, given, cur, notes: notes.map(s => [...s]), secs, diff: $('diff').value }));
+      localStorage.setItem('sudoku', JSON.stringify({ sol, given, cur, notes: notes.map(s => [...s]), secs, diff: $('diff').value, knight }));
     } catch (e) {}
   }
 
@@ -247,11 +265,13 @@ button:hover,select:hover{border-color:var(--thick)}
     ({ sol, given, cur, secs } = d);
     notes = d.notes.map(a => new Set(a));
     $('diff').value = d.diff;
+    setMode(!!d.knight);
   }
 
   function newGame() {
     msgEl.textContent = 'Generating…'; msgEl.className = '';
     setTimeout(() => {
+      setMode($('variant').value === 'knight');
       const { full, puzzle } = generate(+$('diff').value);
       sol = full; given = puzzle.map(v => !!v); cur = puzzle.slice();
       notes = Array.from({ length: 81 }, () => new Set());
