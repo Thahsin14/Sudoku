@@ -31,7 +31,8 @@ button:hover,select:hover{border-color:var(--thick)}
 .c.sel{background:var(--sel);box-shadow:inset 0 0 0 2px var(--user)}
 .c.bad{color:var(--bad);background:var(--badbg)}
 .notes{pointer-events:none;position:absolute;inset:0;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);font-size:clamp(.5rem,2.4vw,.75rem);color:var(--muted);line-height:1;padding:2px}
-.notes span{display:flex;align-items:center;justify-content:center}
+.notes span{display:flex;align-items:center;justify-content:center;border-radius:3px}
+.notes span.hl{background:var(--user);color:var(--panel);font-weight:700}
 #pad{display:grid;grid-template-columns:repeat(9,1fr);gap:6px;margin-top:14px}
 #pad button{padding:10px 0;font-size:1.3rem}
 #pad button.done{opacity:.3}
@@ -52,9 +53,11 @@ button:hover,select:hover{border-color:var(--thick)}
       <option value="knight">Knight</option>
     </select>
     <select id="diff" aria-label="Difficulty">
-      <option value="40">Easy</option>
-      <option value="32" selected>Medium</option>
-      <option value="26">Hard</option>
+      <option value="1">Easy</option>
+      <option value="2" selected>Medium</option>
+      <option value="3">Hard</option>
+      <option value="4">Expert</option>
+      <option value="5">Extreme</option>
     </select>
     <button id="new">New game</button>
     <button id="check">Check</button>
@@ -125,6 +128,7 @@ button:hover,select:hover{border-color:var(--thick)}
   }
 
   function generate(clues) {
+    const t0 = Date.now();
     const full = Array(81).fill(0);
     // randomised fill: solve with shuffled candidate order, keep result
     (function fill() {
@@ -146,12 +150,152 @@ button:hover,select:hover{border-color:var(--thick)}
     const puzzle = full.slice();
     let left = 81;
     for (const i of shuffle([...Array(81).keys()])) {
-      if (left <= clues) break;
+      if (left <= clues || Date.now() - t0 > 1500) break;
       const keep = puzzle[i];
       puzzle[i] = 0;
       if (solve(puzzle.slice(), 2, false) !== 1) puzzle[i] = keep; else left--;
     }
     return { full, puzzle };
+  }
+
+
+  // ---- Difficulty rating: solve like a person and record the hardest technique needed ----
+  // 1 naked singles, 2 hidden singles, 3 naked pairs/triples + locked candidates,
+  // 4 hidden pairs, X-Wing, and a few "what if" trials (try a digit, see if it breaks),
+  // 5 many trials or more than that (needs real guessing).
+  const TRIALS_FOR_EXTREME = 6;
+  const NAMES = ['Easy', 'Medium', 'Hard', 'Expert', 'Extreme'];
+  const UNITS = (() => {
+    const u = [];
+    for (let k = 0; k < 9; k++) {
+      const r = [], c = [], b = [];
+      for (let m = 0; m < 9; m++) {
+        r.push(k * 9 + m); c.push(m * 9 + k);
+        b.push((Math.floor(k / 3) * 3 + Math.floor(m / 3)) * 9 + (k % 3) * 3 + m % 3);
+      }
+      u.push(r, c, b);   // index 3k = row k, 3k+1 = column k, 3k+2 = box k
+    }
+    return u;
+  })();
+  const bits = m => { let n = 0; while (m) { n += m & 1; m >>= 1; } return n; };
+
+  // Assume digit v in cell i0, run naked/hidden singles, and report whether the board breaks.
+  function contradicts(g0, c0, i0, v0) {
+    const g = g0.slice(), c = c0.slice();
+    const place = (i, v) => { g[i] = v; c[i] = 0; PEERS[i].forEach(j => c[j] &= ~(1 << v)); };
+    place(i0, v0);
+    for (let go = true; go;) {
+      go = false;
+      for (let i = 0; i < 81; i++) {
+        if (g[i]) continue;
+        if (!c[i]) return true;
+        if (bits(c[i]) === 1) { place(i, Math.log2(c[i])); go = true; }
+      }
+      for (const u of UNITS) for (let v = 1; v <= 9; v++) {
+        if (u.some(k => g[k] === v)) continue;
+        const cs = u.filter(k => c[k] & (1 << v));
+        if (!cs.length) return true;
+        if (cs.length === 1) { place(cs[0], v); go = true; }
+      }
+    }
+    return false;
+  }
+
+  function rate(start) {
+    const g = start.slice(), cand = Array(81).fill(0);
+    for (let i = 0; i < 81; i++) if (!g[i]) candidates(g, i).forEach(v => cand[i] |= 1 << v);
+    const place = (i, v) => { g[i] = v; cand[i] = 0; PEERS[i].forEach(j => cand[j] &= ~(1 << v)); };
+    const having = (u, v) => u.filter(i => cand[i] & (1 << v));
+    const strip = (cells, mask) => { let ch = false; for (const i of cells) if (cand[i] & mask) { cand[i] &= ~mask; ch = true; } return ch; };
+    let level = 1, trials = 0;
+    for (;;) {
+      if (g.every(Boolean)) return level;
+      const n1 = g.findIndex((v, k) => !v && bits(cand[k]) === 1);
+      if (n1 >= 0) { place(n1, Math.log2(cand[n1])); continue; }
+
+      let hit = false;
+      for (const u of UNITS) {
+        for (let v = 1; v <= 9 && !hit; v++) {
+          if (u.some(k => g[k] === v)) continue;
+          const c = having(u, v);
+          if (c.length === 1) { place(c[0], v); hit = true; }
+        }
+        if (hit) break;
+      }
+      if (hit) { level = Math.max(level, 2); continue; }
+
+      // naked pairs / triples
+      for (const u of UNITS) {
+        const e = u.filter(k => !g[k]);
+        for (let a = 0; a < e.length && !hit; a++) for (let b = a + 1; b < e.length && !hit; b++) {
+          const m2 = cand[e[a]] | cand[e[b]];
+          if (bits(m2) === 2 && strip(e.filter(k => k !== e[a] && k !== e[b]), m2)) hit = true;
+          for (let c = b + 1; c < e.length && !hit; c++) {
+            const m3 = m2 | cand[e[c]];
+            if (bits(m3) === 3 && strip(e.filter(k => k !== e[a] && k !== e[b] && k !== e[c]), m3)) hit = true;
+          }
+        }
+        if (hit) break;
+      }
+      // locked candidates (pointing / claiming)
+      for (const u of UNITS) {
+        for (let v = 1; v <= 9 && !hit; v++) {
+          const c = having(u, v);
+          if (c.length < 2) continue;
+          for (const w of UNITS) if (w !== u && c.every(k => w.includes(k)) && strip(w.filter(k => !u.includes(k)), 1 << v)) { hit = true; break; }
+        }
+        if (hit) break;
+      }
+      if (hit) { level = Math.max(level, 3); continue; }
+
+      // hidden pairs
+      for (const u of UNITS) {
+        for (let v1 = 1; v1 <= 9 && !hit; v1++) for (let v2 = v1 + 1; v2 <= 9 && !hit; v2++) {
+          const a = having(u, v1), b = having(u, v2);
+          if (a.length === 2 && b.length === 2 && a[0] === b[0] && a[1] === b[1] && strip(a, ~((1 << v1) | (1 << v2)) & 0x3fe)) hit = true;
+        }
+        if (hit) break;
+      }
+      // X-Wing
+      for (let t = 0; t < 2 && !hit; t++) for (let v = 1; v <= 9 && !hit; v++) {
+        const ls = [];
+        for (let k = 0; k < 9; k++) { const c = having(UNITS[3 * k + t], v); if (c.length === 2) ls.push([k, c.map(i => t ? Math.floor(i / 9) : i % 9)]); }
+        for (let a = 0; a < ls.length; a++) for (let b = a + 1; b < ls.length; b++) {
+          if (ls[a][1][0] !== ls[b][1][0] || ls[a][1][1] !== ls[b][1][1]) continue;
+          for (const p of ls[a][1]) {
+            const cross = UNITS[3 * p + 1 - t].filter(i => { const q = t ? i % 9 : Math.floor(i / 9); return q !== ls[a][0] && q !== ls[b][0]; });
+            if (strip(cross, 1 << v)) hit = true;
+          }
+        }
+      }
+      if (hit) { level = Math.max(level, 4); continue; }
+
+      // trials
+      for (let i = 0; i < 81 && !hit; i++) {
+        if (g[i] || bits(cand[i]) > 3) continue;
+        for (let v = 1; v <= 9; v++) {
+          if (cand[i] & (1 << v) && contradicts(g, cand, i, v)) { cand[i] &= ~(1 << v); hit = true; break; }
+        }
+      }
+      if (hit) { trials++; level = Math.max(level, trials >= TRIALS_FOR_EXTREME ? 5 : 4); continue; }
+      return 5;
+    }
+  }
+
+  // Keeps generating until a puzzle matches the requested level (or time runs out, then closest).
+  const CLUES = {
+    classic: { 1: 44, 2: 36, 3: 30, 4: 26, 5: 22 },
+    knight:  { 1: 42, 2: 34, 3: 26, 4: 22, 5: 18 }
+  };
+  function generateLevel(T) {
+    const t0 = Date.now();
+    let best = null;
+    do {
+      const r = generate(CLUES[knight ? 'knight' : 'classic'][T]), lv = rate(r.puzzle);
+      if (!best || Math.abs(lv - T) < Math.abs(best.lv - T)) best = { ...r, lv };
+      if (lv === T) break;
+    } while (Date.now() - t0 < 3000);
+    return best;
   }
 
   function build() {
@@ -192,11 +336,14 @@ button:hover,select:hover{border-color:var(--thick)}
       if (bad.has(i) && !given[i]) el.classList.add('bad');
       if (cur[i]) el.textContent = cur[i];
       else if (notes[i].size) {
-        el.innerHTML = '<div class="notes">' + [1,2,3,4,5,6,7,8,9].map(v => '<span>' + (notes[i].has(v) ? v : '') + '</span>').join('') + '</div>';
+        el.innerHTML = '<div class="notes">' + [1,2,3,4,5,6,7,8,9].map(v => '<span' + (v === sv && notes[i].has(v) ? ' class="hl"' : '') + '>' + (notes[i].has(v) ? v : '') + '</span>').join('') + '</div>';
       } else el.textContent = '';
       el.setAttribute('aria-label', 'Row ' + (row(i) + 1) + ' column ' + (col(i) + 1) + ', ' + (cur[i] || 'empty'));
     });
     [...$('pad').children].forEach(b => b.classList.toggle('done', counts[b.dataset.v] >= 9));
+    const auto = multi.size > 1;
+    $('notes').textContent = 'Notes: ' + (noteMode ? 'on' : auto ? 'auto' : 'off');
+    $('notes').setAttribute('aria-pressed', noteMode || auto);
     save();
   }
 
@@ -210,7 +357,7 @@ button:hover,select:hover{border-color:var(--thick)}
     const t = targets();
     if (won || !t.length) return;
     msgEl.textContent = ''; msgEl.className = '';
-    if (noteMode) {
+    if (noteMode || multi.size > 1) {
       const e = t.filter(i => !cur[i]);
       if (!e.length) return;
       const all = e.every(i => notes[i].has(v));
@@ -265,6 +412,7 @@ button:hover,select:hover{border-color:var(--thick)}
     ({ sol, given, cur, secs } = d);
     notes = d.notes.map(a => new Set(a));
     $('diff').value = d.diff;
+    if (!$('diff').value) $('diff').value = '2';
     setMode(!!d.knight);
   }
 
@@ -272,11 +420,11 @@ button:hover,select:hover{border-color:var(--thick)}
     msgEl.textContent = 'Generating…'; msgEl.className = '';
     setTimeout(() => {
       setMode($('variant').value === 'knight');
-      const { full, puzzle } = generate(+$('diff').value);
+      const T = +$('diff').value, gen = generateLevel(T), full = gen.full, puzzle = gen.puzzle;
       sol = full; given = puzzle.map(v => !!v); cur = puzzle.slice();
       notes = Array.from({ length: 81 }, () => new Set());
       sel = -1; multi = new Set(); secs = 0; won = false;
-      msgEl.textContent = '';
+      msgEl.textContent = gen.lv === T ? '' : 'Closest match found: ' + NAMES[gen.lv - 1] + '.';
       render(); startTimer();
     }, 20);
   }
@@ -295,11 +443,7 @@ button:hover,select:hover{border-color:var(--thick)}
   };
   $('erase').onclick = erase;
   $('fill').onclick = fillNotes;
-  $('notes').onclick = e => {
-    noteMode = !noteMode;
-    e.target.setAttribute('aria-pressed', noteMode);
-    e.target.textContent = 'Notes: ' + (noteMode ? 'on' : 'off');
-  };
+  $('notes').onclick = () => { noteMode = !noteMode; render(); };
 
   document.addEventListener('keydown', e => {
     if (e.target.tagName === 'SELECT' || e.ctrlKey || e.metaKey || e.altKey) return;
