@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sudoku</title>
+<style>
+:root{--bg:#e8edf2;--panel:#f7f9fb;--ink:#1b2a3b;--given:#1b2a3b;--user:#0f6f7e;--line:#9fb0c2;--thick:#1b2a3b;--sel:#bfe3e8;--rel:#dbe6ee;--same:#a9d6dd;--bad:#c23b2e;--badbg:#f6d5d1;--muted:#5d6f82}
+@media(prefers-color-scheme:dark){:root{--bg:#141c25;--panel:#1c2733;--ink:#e6edf4;--given:#e6edf4;--user:#6cc7d6;--line:#3d4e60;--thick:#9fb0c2;--sel:#27505a;--rel:#243342;--same:#2f6270;--bad:#ff8b7e;--badbg:#4a2a28;--muted:#8fa2b5}}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{background:var(--bg);color:var(--ink);font-family:Georgia,"Iowan Old Style",serif;display:flex;justify-content:center;padding:16px}
+main{width:100%;max-width:460px}
+header{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px}
+h1{font-size:1.6rem;margin:0;letter-spacing:.02em}
+#timer{font-variant-numeric:tabular-nums;color:var(--muted);font-size:1.1rem}
+.bar{display:flex;gap:8px;margin-bottom:12px}
+select,button{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 12px;cursor:pointer}
+button:hover,select:hover{border-color:var(--thick)}
+:focus-visible{outline:3px solid var(--user);outline-offset:1px}
+.bar button{flex:1}
+#board{display:grid;grid-template-columns:repeat(9,1fr);aspect-ratio:1;background:var(--panel);border:3px solid var(--thick);touch-action:none;user-select:none}
+.c{position:relative;display:flex;align-items:center;justify-content:center;border:0;border-radius:0;padding:0;background:transparent;font-size:clamp(1.2rem,6vw,1.9rem);border-right:1px solid var(--line);border-bottom:1px solid var(--line);color:var(--user)}
+.c:nth-child(9n){border-right:0}
+.c:nth-child(n+73){border-bottom:0}
+.c:nth-child(3n):not(:nth-child(9n)){border-right:2px solid var(--thick)}
+.c:nth-child(n+19):nth-child(-n+27),.c:nth-child(n+46):nth-child(-n+54){border-bottom:2px solid var(--thick)}
+.c.g{color:var(--given);font-weight:700}
+.c.r{background:var(--rel)}
+.c.s2{background:var(--same)}
+.c.sel{background:var(--sel);box-shadow:inset 0 0 0 2px var(--user)}
+.c.bad{color:var(--bad);background:var(--badbg)}
+.notes{display:grid;grid-template-columns:repeat(3,1fr);width:100%;height:100%;font-size:clamp(.5rem,2.4vw,.75rem);color:var(--muted);line-height:1;padding:2px}
+.notes span{display:flex;align-items:center;justify-content:center}
+#pad{display:grid;grid-template-columns:repeat(9,1fr);gap:6px;margin-top:14px}
+#pad button{padding:10px 0;font-size:1.3rem}
+#pad button.done{opacity:.3}
+.tools{display:flex;gap:8px;margin-top:8px}
+.tools button{flex:1}
+.tools button[aria-pressed=true]{background:var(--user);color:var(--panel);border-color:var(--user)}
+#msg{min-height:1.5em;margin:12px 0 0;text-align:center;color:var(--muted)}
+#msg.win{color:var(--user);font-weight:700}
+.sr{position:absolute;left:-9999px}
+</style>
+</head>
+<body>
+<main>
+  <header><h1>Sudoku</h1><span id="timer" aria-label="Elapsed time">0:00</span></header>
+  <div class="bar">
+    <select id="diff" aria-label="Difficulty">
+      <option value="40">Easy</option>
+      <option value="32" selected>Medium</option>
+      <option value="26">Hard</option>
+    </select>
+    <button id="new">New game</button>
+    <button id="check">Check</button>
+  </div>
+  <div id="board" role="grid" aria-label="Sudoku board"></div>
+  <div id="pad"></div>
+  <div class="tools">
+    <button id="notes" aria-pressed="false">Notes: off</button>
+    <button id="erase">Erase</button>
+    <button id="fill" title="Fill notes (F)">Fill notes</button>
+    <button id="hint">Hint</button>
+  </div>
+  <p id="msg" role="status"></p>
+</main>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const boardEl = $('board'), msgEl = $('msg'), timerEl = $('timer');
+  let sol, given, cur, notes, sel = -1, multi = new Set(), dragging = false, noteMode = false, secs = 0, tick = null, won = false;
+
+  const rnd = n => Math.floor(Math.random() * n);
+  const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = rnd(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  const row = i => Math.floor(i / 9), col = i => i % 9;
+  const box = i => Math.floor(row(i) / 3) * 3 + Math.floor(col(i) / 3);
+  const peers = i => { const s = []; for (let j = 0; j < 81; j++) if (j !== i && (row(j) === row(i) || col(j) === col(i) || box(j) === box(i))) s.push(j); return s; };
+  const PEERS = Array.from({ length: 81 }, (_, i) => peers(i));
+
+  function candidates(g, i) {
+    const used = new Set(PEERS[i].map(j => g[j]));
+    const out = [];
+    for (let v = 1; v <= 9; v++) if (!used.has(v)) out.push(v);
+    return out;
+  }
+
+  // Counts solutions up to `limit`; fills g in place when randomize is set.
+  function solve(g, limit, randomize) {
+    let best = -1, bestC = null;
+    for (let i = 0; i < 81; i++) {
+      if (g[i]) continue;
+      const c = candidates(g, i);
+      if (!c.length) return 0;
+      if (!bestC || c.length < bestC.length) { best = i; bestC = c; if (c.length === 1) break; }
+    }
+    if (best < 0) return 1;
+    if (randomize) shuffle(bestC);
+    let n = 0;
+    for (const v of bestC) {
+      g[best] = v;
+      n += solve(g, limit - n, randomize);
+      if (n >= limit) { if (!randomize) g[best] = 0; return n; }
+      g[best] = 0;
+    }
+    return n;
+  }
+
+  function generate(clues) {
+    const full = Array(81).fill(0);
+    // randomised fill: solve with shuffled candidate order, keep result
+    (function fill() {
+      const g = Array(81).fill(0);
+      const rec = () => {
+        let best = -1, bc = null;
+        for (let i = 0; i < 81; i++) {
+          if (g[i]) continue;
+          const c = candidates(g, i);
+          if (!bc || c.length < bc.length) { best = i; bc = c; }
+        }
+        if (best < 0) return true;
+        for (const v of shuffle(bc)) { g[best] = v; if (rec()) return true; }
+        g[best] = 0; return false;
+      };
+      rec();
+      for (let i = 0; i < 81; i++) full[i] = g[i];
+    })();
+    const puzzle = full.slice();
+    let left = 81;
+    for (const i of shuffle([...Array(81).keys()])) {
+      if (left <= clues) break;
+      const keep = puzzle[i];
+      puzzle[i] = 0;
+      if (solve(puzzle.slice(), 2, false) !== 1) puzzle[i] = keep; else left--;
+    }
+    return { full, puzzle };
+  }
+
+  function build() {
+    boardEl.innerHTML = '';
+    for (let i = 0; i < 81; i++) {
+      const b = document.createElement('button');
+      b.className = 'c'; b.dataset.i = i; b.setAttribute('role', 'gridcell');
+      b.addEventListener('click', e => { if (e.detail === 0) { sel = i; multi = new Set([i]); render(); } });
+      boardEl.appendChild(b);
+    }
+    const pad = $('pad');
+    pad.innerHTML = '';
+    for (let v = 1; v <= 9; v++) {
+      const b = document.createElement('button');
+      b.textContent = v; b.dataset.v = v;
+      b.addEventListener('click', () => enter(v));
+      pad.appendChild(b);
+    }
+  }
+
+  function conflicts() {
+    const bad = new Set();
+    for (let i = 0; i < 81; i++) if (cur[i] && PEERS[i].some(j => cur[j] === cur[i])) bad.add(i);
+    return bad;
+  }
+
+  function render() {
+    const bad = conflicts();
+    const single = multi.size === 1;
+    const sv = single ? cur[sel] : 0;
+    const counts = Array(10).fill(0);
+    cur.forEach(v => counts[v]++);
+    [...boardEl.children].forEach((el, i) => {
+      el.className = 'c' + (given[i] ? ' g' : '');
+      if (multi.has(i)) el.classList.add('sel');
+      else if (single && sv && cur[i] === sv) el.classList.add('s2');
+      else if (single && PEERS[sel].includes(i)) el.classList.add('r');
+      if (bad.has(i) && !given[i]) el.classList.add('bad');
+      if (cur[i]) el.textContent = cur[i];
+      else if (notes[i].size) {
+        el.innerHTML = '<div class="notes">' + [1,2,3,4,5,6,7,8,9].map(v => '<span>' + (notes[i].has(v) ? v : '') + '</span>').join('') + '</div>';
+      } else el.textContent = '';
+      el.setAttribute('aria-label', 'Row ' + (row(i) + 1) + ' column ' + (col(i) + 1) + ', ' + (cur[i] || 'empty'));
+    });
+    [...$('pad').children].forEach(b => b.classList.toggle('done', counts[b.dataset.v] >= 9));
+    save();
+  }
+
+  const targets = () => [...multi].filter(i => !given[i]);
+  function place(i, v) {
+    cur[i] = v; notes[i].clear();
+    if (v) PEERS[i].forEach(j => notes[j].delete(v));
+  }
+
+  function enter(v) {
+    const t = targets();
+    if (won || !t.length) return;
+    msgEl.textContent = ''; msgEl.className = '';
+    if (noteMode) {
+      const e = t.filter(i => !cur[i]);
+      if (!e.length) return;
+      const all = e.every(i => notes[i].has(v));
+      e.forEach(i => all ? notes[i].delete(v) : notes[i].add(v));
+    } else {
+      const all = t.every(i => cur[i] === v);
+      t.forEach(i => all ? place(i, 0) : place(i, v));
+    }
+    render(); checkWin();
+  }
+
+  function erase() {
+    const t = targets();
+    if (won || !t.length) return;
+    t.forEach(i => { cur[i] = 0; notes[i].clear(); });
+    render();
+  }
+
+  // Fills notes with the digits that don't clash with the row, column or box.
+  // Applies to every empty cell on the board.
+  function fillNotes() {
+    if (won) return;
+    const empty = [...Array(81).keys()].filter(i => !given[i] && !cur[i]);
+    empty.forEach(i => { notes[i] = new Set(candidates(cur, i)); });
+    msgEl.className = '';
+    msgEl.textContent = empty.length ? 'Filled notes in ' + empty.length + (empty.length === 1 ? ' cell.' : ' cells.') : 'No empty cells left.';
+    render();
+  }
+
+  function checkWin() {
+    if (cur.every((v, i) => v === sol[i])) {
+      won = true; clearInterval(tick);
+      msgEl.textContent = 'Solved in ' + fmt(secs) + '.'; msgEl.className = 'win';
+      localStorage.removeItem('sudoku');
+    }
+  }
+
+  const fmt = s => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  function startTimer() {
+    clearInterval(tick); timerEl.textContent = fmt(secs);
+    tick = setInterval(() => { secs++; timerEl.textContent = fmt(secs); if (secs % 5 === 0) save(); }, 1000);
+  }
+
+  function save() {
+    if (won) return;
+    try {
+      localStorage.setItem('sudoku', JSON.stringify({ sol, given, cur, notes: notes.map(s => [...s]), secs, diff: $('diff').value }));
+    } catch (e) {}
+  }
+
+  function load(d) {
+    ({ sol, given, cur, secs } = d);
+    notes = d.notes.map(a => new Set(a));
+    $('diff').value = d.diff;
+  }
+
+  function newGame() {
+    msgEl.textContent = 'Generating…'; msgEl.className = '';
+    setTimeout(() => {
+      const { full, puzzle } = generate(+$('diff').value);
+      sol = full; given = puzzle.map(v => !!v); cur = puzzle.slice();
+      notes = Array.from({ length: 81 }, () => new Set());
+      sel = -1; multi = new Set(); secs = 0; won = false;
+      msgEl.textContent = '';
+      render(); startTimer();
+    }, 20);
+  }
+
+  $('new').onclick = newGame;
+  $('check').onclick = () => {
+    if (won) return;
+    const wrong = cur.filter((v, i) => v && v !== sol[i]).length;
+    msgEl.className = '';
+    msgEl.textContent = wrong ? wrong + (wrong === 1 ? ' cell is' : ' cells are') + ' wrong.' : 'No mistakes so far.';
+  };
+  $('hint').onclick = () => {
+    const t = targets();
+    if (won || !t.length) { msgEl.textContent = 'Select an empty cell for a hint.'; return; }
+    t.forEach(i => place(i, sol[i])); render(); checkWin();
+  };
+  $('erase').onclick = erase;
+  $('fill').onclick = fillNotes;
+  $('notes').onclick = e => {
+    noteMode = !noteMode;
+    e.target.setAttribute('aria-pressed', noteMode);
+    e.target.textContent = 'Notes: ' + (noteMode ? 'on' : 'off');
+  };
+
+  document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'SELECT' || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (/^[1-9]$/.test(e.key)) enter(+e.key);
+    else if (e.key === 'Backspace' || e.key === 'Delete' || e.key === '0') erase();
+    else if (e.key === 'n' || e.key === 'N') $('notes').click();
+    else if (e.key === 'f' || e.key === 'F') fillNotes();
+    else if (e.key === 'Escape') { sel = -1; multi = new Set(); render(); }
+    else if (e.key.startsWith('Arrow')) {
+      e.preventDefault();
+      if (sel < 0) sel = 0;
+      else {
+        const r = row(sel), c = col(sel);
+        if (e.key === 'ArrowUp') sel = ((r + 8) % 9) * 9 + c;
+        if (e.key === 'ArrowDown') sel = ((r + 1) % 9) * 9 + c;
+        if (e.key === 'ArrowLeft') sel = r * 9 + (c + 8) % 9;
+        if (e.key === 'ArrowRight') sel = r * 9 + (c + 1) % 9;
+      }
+      multi = e.shiftKey ? new Set([...multi, sel]) : new Set([sel]);
+      render(); boardEl.children[sel].focus();
+    }
+  });
+
+  // Multi-select: shift/ctrl-click to add or remove cells, or drag across cells.
+  const cellAt = (x, y) => { const el = document.elementFromPoint(x, y); return el && el.dataset && el.dataset.i !== undefined && boardEl.contains(el) ? +el.dataset.i : -1; };
+  boardEl.addEventListener('pointerdown', e => {
+    const i = cellAt(e.clientX, e.clientY);
+    if (i < 0) return;
+    e.preventDefault();
+    if (e.ctrlKey || e.metaKey) { multi.has(i) ? multi.delete(i) : multi.add(i); }
+    else if (e.shiftKey) multi.add(i);
+    else multi = new Set([i]);
+    sel = multi.size ? i : -1;
+    dragging = true; render();
+  });
+  document.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const i = cellAt(e.clientX, e.clientY);
+    if (i >= 0 && !multi.has(i)) { multi.add(i); sel = i; render(); }
+  });
+  document.addEventListener('pointerup', () => { dragging = false; });
+  document.addEventListener('pointercancel', () => { dragging = false; });
+
+  build();
+  try {
+    const saved = JSON.parse(localStorage.getItem('sudoku'));
+    if (saved && saved.cur) { load(saved); won = false; render(); startTimer(); return; }
+  } catch (e) {}
+  newGame();
+})();
+</script>
+</body>
+</html>
