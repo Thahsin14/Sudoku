@@ -32,6 +32,11 @@ main{flex:1;min-width:0;width:100%;max-width:460px}
 .sumrow .big{font-size:1.4rem;color:var(--user)}
 .cgblock{margin-bottom:12px}
 .cgblock:last-child{margin-bottom:0}
+.bw{position:relative}
+#dots{position:absolute;inset:3px;pointer-events:none}
+.dot{position:absolute;width:clamp(11px,3.2vw,16px);aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;background:#fff;border:2px solid #2b2b2b}
+.dot.b{background:#111;border-color:#9aa5b1}
+#rule{margin:0 0 10px}
 .meta{color:var(--muted);margin:0 0 8px;font-size:.9rem}
 .calcIn{display:flex;gap:8px;margin-bottom:10px}
 .calcIn input{flex:1;min-width:0;font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
@@ -90,6 +95,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
       <option value="knight">Knight</option>
       <option value="king">King</option>
       <option value="killer">Killer</option>
+      <option value="kropki">Kropki</option>
     </select>
     <select id="diff" aria-label="Difficulty">
       <option value="1">Easy</option>
@@ -97,11 +103,13 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
       <option value="3">Hard</option>
       <option value="4">Expert</option>
       <option value="5">Extreme</option>
+      <option value="6" hidden>Insane</option>
     </select>
     <button id="new">New game</button>
     <button id="check">Check</button>
   </div>
-  <div id="board" role="grid" aria-label="Sudoku board"></div>
+  <p id="rule" class="meta" hidden></p>
+  <div class="bw"><div id="board" role="grid" aria-label="Sudoku board"></div><div id="dots" aria-hidden="true"></div></div>
   <div id="pad"></div>
   <div class="tools">
     <button id="undo" title="Undo (Backspace or Ctrl+Z)">Undo</button>
@@ -146,7 +154,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   const box = i => Math.floor(row(i) / 3) * 3 + Math.floor(col(i) / 3);
   // Variants. Knight: a chess knight's move apart can't share a digit. King: touching cells
   // (diagonals included) can't share one. Killer: cages must add up to their sum, no repeats inside.
-  let mode = 'classic', cages = null, cageOf = null, budget = Infinity;
+  let mode = 'classic', cages = null, cageOf = null, dots = null, budget = Infinity;
   const buildPeers = (m, cg) => {
     const own = Array(81).fill(-1);
     if (cg) cg.forEach((c, k) => c.cells.forEach(i => own[i] = k));
@@ -163,9 +171,26 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     });
   };
   let PEERS = buildPeers('classic', null);
-  const TITLES = { classic: 'Sudoku', knight: 'Knight Sudoku', king: 'King Sudoku', killer: 'Killer Sudoku' };
+  const RULES = {
+    classic: '',
+    knight: "Knight: cells a chess knight's move apart can't hold the same digit.",
+    king: "King: cells that touch, even diagonally, can't hold the same digit.",
+    killer: 'Killer: each cage adds up to its small number, with no repeats inside it.',
+    kropki: 'Kropki: white dot = consecutive digits, black dot = one is double the other. No dot = neither.'
+  };
+  const TITLES = { classic: 'Sudoku', knight: 'Knight Sudoku', king: 'King Sudoku', killer: 'Killer Sudoku', kropki: 'Kropki Sudoku' };
+  // The 6th level (Insane) only exists where the number of givens can drop to about zero.
+  const syncLevels = m => {
+    const hard = m === 'killer' || m === 'kropki';
+    const opt6 = [...$('diff').options].find(o => o.value === '6');
+    opt6.hidden = opt6.disabled = !hard;
+    if (!hard && $('diff').value === '6') $('diff').value = '5';
+  };
   const setMode = m => {
-    mode = m; cages = null; cageOf = null; PEERS = buildPeers(m, null);
+    mode = m; cages = null; cageOf = null; dots = null; PEERS = buildPeers(m, null);
+    const rule = RULES[m];
+    $('rule').textContent = rule; $('rule').hidden = !rule;
+    syncLevels(m);
     $('variant').value = m;
     $('title').textContent = TITLES[m];
     $('board').classList.toggle('k', m === 'killer');
@@ -186,17 +211,21 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     cg.forEach((c, k) => { c.cells.forEach(i => cageOf[i] = k); c.masks = combos(c.sum, c.cells.length).map(str => [...str].reduce((m, d) => m | 1 << d, 0)); });
     PEERS = buildPeers(mode, cg);
   };
-  // Random cages of 1-4 orthogonally connected cells with distinct digits in the solution.
-  function makeCages(full) {
+  const orth = c => [row(c) > 0 && c - 9, row(c) < 8 && c + 9, col(c) > 0 && c - 1, col(c) < 8 && c + 1].filter(n => n !== false);
+  const NB = Array.from({ length: 81 }, (_, i) => orth(i));
+
+  // Random cages of orthogonally connected cells with distinct digits in the solution.
+  // Harder levels have no single-cell cages (those are just givens); small cages keep the puzzle solvable with few givens.
+  const CAGE_SIZES = { 1: [2, 2, 3, 3, 3, 4, 4], 2: [2, 2, 3, 3, 3, 4, 4], 3: [2, 3, 3, 3, 4, 4], 4: [2, 2, 3, 3, 3], 5: [2, 2, 2, 3, 3], 6: [2, 2, 2, 3] };
+  function buildCages(full, sizes) {
     const owner = Array(81).fill(-1), out = [];
-    const nbrs = c => [row(c) > 0 && c - 9, row(c) < 8 && c + 9, col(c) > 0 && c - 1, col(c) < 8 && c + 1].filter(n => n !== false);
     for (const st of shuffle([...Array(81).keys()])) {
       if (owner[st] >= 0) continue;
-      const cells = [st], size = [2, 2, 3, 3, 3, 4, 4][rnd(7)];
+      const cells = [st], size = sizes[rnd(sizes.length)];
       owner[st] = out.length;
       while (cells.length < size) {
         const opts = [];
-        for (const c of cells) for (const n of nbrs(c))
+        for (const c of cells) for (const n of NB[c])
           if (owner[n] < 0 && !cells.some(x => full[x] === full[n]) && !opts.includes(n)) opts.push(n);
         if (!opts.length) break;
         const n = opts[rnd(opts.length)];
@@ -205,6 +234,57 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
       out.push({ cells, sum: cells.reduce((a, i) => a + full[i], 0) });
     }
     return out;
+  }
+  // folds single-cell cages into a neighbouring cage when the digits stay different
+  function mergeSingles(cg, full) {
+    const owner = Array(81).fill(-1);
+    cg.forEach((c, k) => c.cells.forEach(i => owner[i] = k));
+    cg.forEach((c, k) => {
+      if (c.cells.length !== 1) return;
+      const i = c.cells[0];
+      for (const n of shuffle(NB[i].slice())) {
+        const t = cg[owner[n]];
+        if (owner[n] !== k && t.cells.length < 6 && !t.cells.some(x => full[x] === full[i])) {
+          t.cells.push(i); t.sum += full[i]; owner[i] = owner[n]; c.cells = []; break;
+        }
+      }
+    });
+    return cg.filter(c => c.cells.length);
+  }
+  function makeCages(full, T) {
+    const maxSingles = T <= 2 ? 99 : T === 3 ? 2 : 0;
+    let best = null;
+    for (let t = 0; t < 80; t++) {
+      let cg = buildCages(full, CAGE_SIZES[T] || CAGE_SIZES[2]);
+      if (T >= 3) cg = mergeSingles(cg, full);
+      const singles = cg.filter(c => c.cells.length === 1).length;
+      if (!best || singles < best.singles) best = { cg, singles };
+      if (singles <= maxSingles) break;
+    }
+    return best.cg;
+  }
+
+  // Kropki: every neighbouring pair is 2 (black: one is double the other), 1 (white: differ by 1) or 0 (no dot).
+  // The pair 1-2 is black. A pair has to match its dot exactly, so "no dot" is a rule too.
+  const relT = (a, b) => a === 2 * b || b === 2 * a ? 2 : Math.abs(a - b) === 1 ? 1 : 0;
+  const edgeT = (i, j) => j === i + 1 ? dots.h[i] : j === i - 1 ? dots.h[j] : j === i + 9 ? dots.v[i] : dots.v[j];
+  const applyDots = d => { dots = d; };
+  function makeDots(full) {
+    const h = Array(81).fill(0), v = Array(81).fill(0);
+    for (let i = 0; i < 81; i++) {
+      if (col(i) < 8) h[i] = relT(full[i], full[i + 1]);
+      if (row(i) < 8) v[i] = relT(full[i], full[i + 9]);
+    }
+    return { h, v };
+  }
+  function updateDots() {
+    let html = '';
+    if (dots) for (let i = 0; i < 81; i++) {
+      const r = row(i), c = col(i);
+      if (dots.h[i]) html += '<i class="dot ' + (dots.h[i] === 2 ? 'b' : 'w') + '" style="left:' + (c + 1) * 100 / 9 + '%;top:' + (r + .5) * 100 / 9 + '%"></i>';
+      if (dots.v[i]) html += '<i class="dot ' + (dots.v[i] === 2 ? 'b' : 'w') + '" style="left:' + (c + .5) * 100 / 9 + '%;top:' + (r + 1) * 100 / 9 + '%"></i>';
+    }
+    $('dots').innerHTML = html;
   }
   const isLabel = i => cageOf && Math.min(...cages[cageOf[i]].cells) === i;   // cell that shows the cage sum
   const cageHtml = i => {
@@ -224,7 +304,11 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
       for (const m of cg.masks) if ((m & have) === have) allowed |= m;
     }
     const out = [];
-    for (let v = 1; v <= 9; v++) if (!used.has(v) && allowed & (1 << v)) out.push(v);
+    for (let v = 1; v <= 9; v++) {
+      if (used.has(v) || !(allowed & (1 << v))) continue;
+      if (dots && NB[i].some(j => g[j] && relT(v, g[j]) !== edgeT(i, j))) continue;
+      out.push(v);
+    }
     return out;
   }
 
@@ -250,9 +334,9 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     return n;
   }
 
-  function generate(clues) {
+  function generate(clues, T) {
     const t0 = Date.now();
-    cages = null; cageOf = null; PEERS = buildPeers(mode, null);
+    cages = null; cageOf = null; dots = null; PEERS = buildPeers(mode, null);
     const full = Array(81).fill(0);
     // randomised fill: solve with shuffled candidate order, keep result
     (function fill() {
@@ -271,7 +355,8 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
       rec();
       for (let i = 0; i < 81; i++) full[i] = g[i];
     })();
-    if (mode === 'killer') applyCages(makeCages(full));
+    if (mode === 'killer') applyCages(makeCages(full, T));
+    if (mode === 'kropki') applyDots(makeDots(full));
     const puzzle = full.slice();
     let left = 81;
     for (const i of shuffle([...Array(81).keys()])) {
@@ -282,7 +367,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
       if (solve(puzzle.slice(), 2, false) !== 1) puzzle[i] = keep; else left--;
     }
     budget = Infinity;
-    return { full, puzzle, cages };
+    return { full, puzzle, cages, dots };
   }
 
 
@@ -291,7 +376,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   // 4 hidden pairs, X-Wing, and a few "what if" trials (try a digit, see if it breaks),
   // 5 many trials or more than that (needs real guessing).
   const TRIALS_FOR_EXTREME = 6;
-  const NAMES = ['Easy', 'Medium', 'Hard', 'Expert', 'Extreme'];
+  const NAMES = ['Easy', 'Medium', 'Hard', 'Expert', 'Extreme', 'Insane'];
   const UNITS = (() => {
     const u = [];
     for (let k = 0; k < 9; k++) {
@@ -414,13 +499,16 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     classic: { 1: 44, 2: 36, 3: 30, 4: 26, 5: 22 },
     knight:  { 1: 42, 2: 34, 3: 26, 4: 22, 5: 18 },
     king:    { 1: 42, 2: 34, 3: 26, 4: 22, 5: 18 },
-    killer:  { 1: 30, 2: 20, 3: 12, 4: 6, 5: 0 }
+    killer:  { 1: 30, 2: 20, 3: 12, 4: 6, 5: 3, 6: 0 },
+    kropki:  { 1: 30, 2: 18, 3: 10, 4: 4, 5: 2, 6: 0 }
   };
+  // Killer / Kropki have no technique rating: the fewer givens, the harder.
+  const levelByClues = n => n >= 26 ? 1 : n >= 16 ? 2 : n >= 9 ? 3 : n >= (mode === 'killer' ? 6 : 4) ? 4 : n >= (mode === 'killer' ? 3 : 2) ? 5 : 6;
   function generateLevel(T) {
     const t0 = Date.now();
     let best = null;
     do {
-      const r = generate(CLUES[mode][T]), lv = mode === 'killer' ? T : rate(r.puzzle);
+      const r = generate(CLUES[mode][T] ?? CLUES[mode][5], T), lv = mode === 'killer' || mode === 'kropki' ? levelByClues(r.puzzle.filter(Boolean).length) : rate(r.puzzle);
       if (!best || Math.abs(lv - T) < Math.abs(best.lv - T)) best = { ...r, lv };
       if (lv === T) break;
     } while (Date.now() - t0 < 3000);
@@ -452,6 +540,8 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
       const sum = c.cells.reduce((a, i) => a + cur[i], 0), full = c.cells.every(i => cur[i]);
       if (sum > c.sum || (full && sum !== c.sum)) c.cells.forEach(i => bad.add(i));
     });
+    if (dots) for (let i = 0; i < 81; i++) for (const j of NB[i])
+      if (j > i && cur[i] && cur[j] && relT(cur[i], cur[j]) !== edgeT(i, j)) { bad.add(i); bad.add(j); }
     return bad;
   }
 
@@ -477,7 +567,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     $('notes').textContent = 'Notes: ' + (noteMode ? 'on' : auto ? 'auto' : 'off');
     $('notes').setAttribute('aria-pressed', noteMode || auto);
     $('undo').disabled = !undo.length; $('redo').disabled = !redo.length;
-    updateSide();
+    updateSide(); updateDots();
     save();
   }
 
@@ -633,7 +723,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   function save() {
     if (won) return;
     try {
-      localStorage.setItem('sudoku', JSON.stringify({ sol, given, cur, notes: notes.map(s => [...s]), secs, diff: $('diff').value, mode, cages }));
+      localStorage.setItem('sudoku', JSON.stringify({ sol, given, cur, notes: notes.map(s => [...s]), secs, diff: $('diff').value, mode, cages, dots }));
     } catch (e) {}
   }
 
@@ -645,6 +735,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     if (!$('diff').value) $('diff').value = '2';
     setMode(d.mode || (d.knight ? 'knight' : 'classic'));
     if (d.cages) applyCages(d.cages);
+    if (d.dots) applyDots(d.dots);
   }
 
   function newGame() {
@@ -653,6 +744,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
       setMode($('variant').value);
       const T = +$('diff').value, gen = generateLevel(T), full = gen.full, puzzle = gen.puzzle;
       if (mode === 'killer') applyCages(gen.cages);
+      if (mode === 'kropki') applyDots(gen.dots);
       sol = full; given = puzzle.map(v => !!v); cur = puzzle.slice();
       notes = Array.from({ length: 81 }, () => new Set());
       sel = -1; multi = new Set(); secs = 0; won = false; undo = []; redo = []; struck = {};
@@ -681,6 +773,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     commit(before); render(); checkWin();
   };
   $('erase').onclick = erase;
+  $('variant').onchange = () => syncLevels($('variant').value);
   $('undo').onclick = undoMove;
   $('redo').onclick = redoMove;
   $('fill').onclick = fillNotes;
