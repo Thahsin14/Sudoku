@@ -668,11 +668,17 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     msgEl.className = '';
     msgEl.textContent = wrong ? wrong + (wrong === 1 ? ' cell is' : ' cells are') + ' wrong.' : 'No mistakes so far.';
   };
+  // Hint reveals a random unsolved cell (empty ones first), whatever is selected.
   $('hint').onclick = () => {
-    const t = targets();
-    if (won || !t.length) { msgEl.textContent = 'Select an empty cell for a hint.'; return; }
-    const before = snapshot();
-    t.forEach(i => place(i, sol[i])); commit(before); render(); checkWin();
+    if (won) return;
+    const open = [...Array(81).keys()].filter(i => !given[i] && cur[i] !== sol[i]);
+    const empty = open.filter(i => !cur[i]), pool = empty.length ? empty : open;
+    if (!pool.length) return;
+    const i = pool[rnd(pool.length)], before = snapshot();
+    place(i, sol[i]);
+    sel = i; multi = new Set([i]);
+    msgEl.className = ''; msgEl.textContent = 'Hint: row ' + (row(i) + 1) + ', column ' + (col(i) + 1) + '.';
+    commit(before); render(); checkWin();
   };
   $('erase').onclick = erase;
   $('undo').onclick = undoMove;
