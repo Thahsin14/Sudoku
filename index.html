@@ -30,6 +30,8 @@ main{flex:1;min-width:0;width:100%;max-width:460px}
 .sumrow{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:4px 0;border-bottom:1px solid var(--line);font-size:.9rem}
 .sumrow:last-child{border-bottom:0}
 .sumrow .big{font-size:1.4rem;color:var(--user)}
+.cgblock{margin-bottom:12px}
+.cgblock:last-child{margin-bottom:0}
 .meta{color:var(--muted);margin:0 0 8px;font-size:.9rem}
 .calcIn{display:flex;gap:8px;margin-bottom:10px}
 .calcIn input{flex:1;min-width:0;font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
@@ -58,10 +60,11 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
 .c.bad{color:var(--bad);background:var(--badbg)}
 .notes{pointer-events:none;position:absolute;inset:0;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);font-size:clamp(.5rem,2.4vw,.75rem);color:var(--muted);line-height:1;padding:2px}
 .notes span{display:flex;align-items:center;justify-content:center;border-radius:3px}
-.k .notes{padding:13px 2px 2px}
-.cg{position:absolute;inset:3px;pointer-events:none;border:1px dashed transparent}
+.k .notes{padding:4px 4px 3px;font-size:clamp(.5rem,2.1vw,.66rem)}
+.k .notes.lab{padding:11px 4px 2px}
+.cg{position:absolute;inset:2px;pointer-events:none;border:1px dashed transparent}
 .cg.t{border-top-color:var(--cage)}.cg.b{border-bottom-color:var(--cage)}.cg.l{border-left-color:var(--cage)}.cg.r{border-right-color:var(--cage)}
-.sum{position:absolute;top:1px;left:3px;font-size:clamp(.6rem,2.7vw,.82rem);line-height:1;font-weight:600;color:var(--muted);pointer-events:none}
+.sum{position:absolute;top:2px;left:3px;font-size:clamp(.58rem,2.4vw,.74rem);line-height:1;font-weight:600;color:var(--muted);pointer-events:none}
 .notes span.hl{background:var(--user);color:var(--panel);font-weight:700}
 #pad{display:grid;grid-template-columns:repeat(9,1fr);gap:6px;margin-top:14px}
 #pad button{padding:10px 0;font-size:1.3rem}
@@ -101,12 +104,12 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   <div id="board" role="grid" aria-label="Sudoku board"></div>
   <div id="pad"></div>
   <div class="tools">
-    <button id="undo" title="Undo (Ctrl+Z)">Undo</button>
+    <button id="undo" title="Undo (Backspace or Ctrl+Z)">Undo</button>
     <button id="redo" title="Redo (Ctrl+Y)">Redo</button>
   </div>
   <div class="tools">
-    <button id="notes" aria-pressed="false">Notes: off</button>
-    <button id="erase">Erase</button>
+    <button id="notes" title="Toggle notes (X)" aria-pressed="false">Notes: off</button>
+    <button id="erase" title="Clear cells (C)">Erase</button>
     <button id="fill" title="Fill notes (F)">Fill notes</button>
     <button id="hint">Hint</button>
   </div>
@@ -203,11 +206,12 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     }
     return out;
   }
+  const isLabel = i => cageOf && Math.min(...cages[cageOf[i]].cells) === i;   // cell that shows the cage sum
   const cageHtml = i => {
     if (!cageOf) return '';
     const k = cageOf[i], c = cages[k], d = j => cageOf[j] !== k;
-    const cls = [multi.size === 1 && cageOf[sel] === k ? 'on' : '', row(i) === 0 || d(i - 9) ? 't' : '', row(i) === 8 || d(i + 9) ? 'b' : '', col(i) === 0 || d(i - 1) ? 'l' : '', col(i) === 8 || d(i + 1) ? 'r' : ''].join(' ');
-    return '<i class="cg ' + cls + '"></i>' + (Math.min(...c.cells) === i ? '<b class="sum">' + c.sum + '</b>' : '');
+    const cls = [[...multi].some(j => cageOf[j] === k) ? 'on' : '', row(i) === 0 || d(i - 9) ? 't' : '', row(i) === 8 || d(i + 9) ? 'b' : '', col(i) === 0 || d(i - 1) ? 'l' : '', col(i) === 8 || d(i + 1) ? 'r' : ''].join(' ');
+    return '<i class="cg ' + cls + '"></i>' + (isLabel(i) ? '<b class="sum">' + c.sum + '</b>' : '');
   };
 
   function candidates(g, i) {
@@ -464,7 +468,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
       else if (single && PEERS[sel].includes(i)) el.classList.add('r');
       if (bad.has(i) && !given[i]) el.classList.add('bad');
       el.innerHTML = (cur[i] ? cur[i] : notes[i].size
-        ? '<div class="notes">' + [1,2,3,4,5,6,7,8,9].map(v => '<span' + (v === sv && notes[i].has(v) ? ' class="hl"' : '') + '>' + (notes[i].has(v) ? v : '') + '</span>').join('') + '</div>'
+        ? '<div class="notes' + (isLabel(i) ? ' lab' : '') + '">' + [1,2,3,4,5,6,7,8,9].map(v => '<span' + (v === sv && notes[i].has(v) ? ' class="hl"' : '') + '>' + (notes[i].has(v) ? v : '') + '</span>').join('') + '</div>'
         : '') + cageHtml(i);
       el.setAttribute('aria-label', 'Row ' + (row(i) + 1) + ' column ' + (col(i) + 1) + ', ' + (cur[i] || 'empty'));
     });
@@ -478,26 +482,34 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   }
 
   // ---- Killer side panels: cage combinations + calculator ----
-  const chips = (list, crossed, fits) => list.length
-    ? '<div class="chips">' + list.map(c => '<button class="chip' + (crossed.has(c) ? ' x' : '') + (fits && !fits(c) ? ' off' : '') + '" data-c="' + c + '">' + c + '</button>').join('') + '</div>'
+  const chips = (list, crossed, fits, k) => list.length
+    ? '<div class="chips">' + list.map(c => '<button class="chip' + (crossed.has(c) ? ' x' : '') + (fits && !fits(c) ? ' off' : '') + '" data-c="' + c + '"' + (k !== undefined ? ' data-k="' + k + '"' : '') + '>' + c + '</button>').join('') + '</div>'
     : '<p class="meta">No combinations.</p>';
-  const selCage = () => multi.size === 1 && cageOf && cageOf[sel] >= 0 ? cageOf[sel] : -1;
+  // every cage that has at least one selected cell, in board order
+  const selCages = () => cageOf ? [...new Set([...multi].map(i => cageOf[i]).filter(k => k >= 0))].sort((a, b) => Math.min(...cages[a].cells) - Math.min(...cages[b].cells)) : [];
+  const MAX_CAGES = 6;
+
+  function cageBlock(k) {
+    const c = cages[k], placed = c.cells.map(i => cur[i]).filter(Boolean);
+    const crossed = struck[k] || (struck[k] = new Set());
+    const left = c.cells.length - placed.length, rest = c.sum - placed.reduce((a, b) => a + b, 0);
+    const list = combos(c.sum, c.cells.length), fits = cmb => placed.every(d => cmb.includes(d));
+    return '<div class="cgblock"><p class="meta">Sum ' + c.sum + ' · ' + c.cells.length + (c.cells.length === 1 ? ' cell' : ' cells') +
+      (placed.length && left ? ' · ' + rest + ' left in ' + left + (left === 1 ? ' cell' : ' cells') : '') + '</p>' +
+      (list.some(fits) ? '' : '<p class="meta">None of these fit the digits already in the cage.</p>') + chips(list, crossed, fits, k) + '</div>';
+  }
 
   function updateSide() {
     const on = mode === 'killer';
     $('side').hidden = !on; $('layout').classList.toggle('k', on);
     if (!on) return;
     updateSum();
-    const k = selCage();
-    if (k < 0) { $('comboBody').innerHTML = '<p class="meta">Select a cell to see the combinations for its cage.</p>'; return; }
-    const c = cages[k], placed = c.cells.map(i => cur[i]).filter(Boolean);
-    const crossed = struck[k] || (struck[k] = new Set());
-    const left = c.cells.length - placed.length, rest = c.sum - placed.reduce((a, b) => a + b, 0);
-    const list = combos(c.sum, c.cells.length), fits = cmb => placed.every(d => cmb.includes(d));
-    $('comboBody').innerHTML = '<p class="meta">Sum ' + c.sum + ' · ' + c.cells.length + (c.cells.length === 1 ? ' cell' : ' cells') +
-      (placed.length && left ? ' · ' + rest + ' left in ' + left + (left === 1 ? ' cell' : ' cells') : '') + '</p>' +
-      (list.some(fits) ? '' : '<p class="meta">None of these fit the digits already in the cage.</p>') + chips(list, crossed, fits);
+    const ks = selCages();
+    if (!ks.length) { $('comboBody').innerHTML = '<p class="meta">Select a cell to see the combinations for its cage.</p>'; return; }
+    $('comboBody').innerHTML = ks.slice(0, MAX_CAGES).map(cageBlock).join('') +
+      (ks.length > MAX_CAGES ? '<p class="meta">+ ' + (ks.length - MAX_CAGES) + ' more cages. Select fewer cells to see them.</p>' : '');
   }
+
   // Adds up the cage sums of the selected cells (only cages that are fully selected count).
   function updateSum() {
     const cells = [...multi], body = $('sumBody');
@@ -508,14 +520,16 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     for (const k in per) {
       if (per[k] === cages[k].cells.length) { whole += cages[k].sum; wholeN++; } else { partN++; partCells += per[k]; }
     }
-    const entered = cells.reduce((a, i) => a + cur[i], 0), set = new Set(cells);
+    const set = new Set(cells);
+    const inPart = cells.filter(i => per[cageOf[i]] !== cages[cageOf[i]].cells.length);
+    const typed = inPart.reduce((a, i) => a + cur[i], 0);   // digits already entered count, solved cage or not
     const isUnit = UNITS.some(u => u.length === cells.length && u.every(i => set.has(i)));
     const r = (a, b, big) => '<div class="sumrow"><span>' + a + '</span><b' + (big ? ' class="big"' : '') + '>' + b + '</b></div>';
     body.innerHTML = r(cells.length === 1 ? '1 cell' : cells.length + ' cells', '') +
-      r('Whole cages (' + wholeN + ')', whole, true) +
-      (partN ? r('Partial cages (' + partN + ', ' + partCells + (partCells === 1 ? ' cell' : ' cells') + ')', 'not counted') : '') +
-      (entered ? r('Digits entered', entered) : '') +
-      (isUnit ? r('Row / column / box total', 45) + (partN ? r('Cells in partial cages add up to', 45 - whole) : '') : '');
+      r('Whole cages (' + wholeN + ')', whole) +
+      (partN ? r('Digits in partial cages (' + partCells + (partCells === 1 ? ' cell' : ' cells') + ')', typed) : '') +
+      r('Total', whole + typed, true) +
+      (isUnit ? r('Row / column / box total', 45) + (partN ? r('Partial-cage cells add up to', 45 - whole) + (typed ? r('Still to place there', 45 - whole - typed) : '') : '') : '');
   }
   let calcCrossed = new Set();
   function updateCalc() {
@@ -526,10 +540,10 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   }
   const toggle = (set, c) => set.has(c) ? set.delete(c) : set.add(c);
   $('comboBody').addEventListener('click', e => {
-    const b = e.target.closest('.chip'), k = selCage();
-    if (b && k >= 0) { toggle(struck[k], b.dataset.c); updateSide(); }
+    const b = e.target.closest('.chip');
+    if (b && b.dataset.k !== undefined) { toggle(struck[+b.dataset.k], b.dataset.c); updateSide(); }
   });
-  $('comboReset').onclick = () => { const k = selCage(); if (k >= 0) struck[k] = new Set(); updateSide(); };
+  $('comboReset').onclick = () => { selCages().forEach(k => { struck[k] = new Set(); }); updateSide(); };
   $('comboHide').onclick = e => { const h = $('comboBody').hidden = !$('comboBody').hidden; e.target.textContent = h ? 'Show' : 'Hide'; };
   $('calcBody').addEventListener('click', e => { const b = e.target.closest('.chip'); if (b) { toggle(calcCrossed, b.dataset.c); updateCalc(); } });
   $('calcSum').oninput = $('calcSize').oninput = () => { calcCrossed = new Set(); updateCalc(); };
@@ -672,10 +686,11 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
       if (k === 'z') { e.preventDefault(); e.shiftKey ? redoMove() : undoMove(); return; }
       if (k === 'y') { e.preventDefault(); redoMove(); return; }
     }
-    if (e.target.tagName === 'SELECT' || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (/^(SELECT|INPUT|TEXTAREA)$/.test(e.target.tagName) || e.ctrlKey || e.metaKey || e.altKey) return;
     if (/^[1-9]$/.test(e.key)) enter(+e.key);
-    else if (e.key === 'Backspace' || e.key === 'Delete' || e.key === '0') erase();
-    else if (e.key === 'n' || e.key === 'N') $('notes').click();
+    else if (e.key === 'Backspace') { e.preventDefault(); undoMove(); }
+    else if (e.key === 'Delete' || e.key === '0' || e.key === 'c' || e.key === 'C') erase();
+    else if (e.key === 'x' || e.key === 'X' || e.key === 'n' || e.key === 'N') $('notes').click();
     else if (e.key === 'f' || e.key === 'F') fillNotes();
     else if (e.key === 'Escape') { sel = -1; multi = new Set(); render(); }
     else if (e.key.startsWith('Arrow')) {
