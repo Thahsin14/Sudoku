@@ -487,7 +487,6 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     : '<p class="meta">No combinations.</p>';
   // every cage that has at least one selected cell, in board order
   const selCages = () => cageOf ? [...new Set([...multi].map(i => cageOf[i]).filter(k => k >= 0))].sort((a, b) => Math.min(...cages[a].cells) - Math.min(...cages[b].cells)) : [];
-  const MAX_CAGES = 6;
 
   function cageBlock(k) {
     const c = cages[k], placed = c.cells.map(i => cur[i]).filter(Boolean);
@@ -506,8 +505,9 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     updateSum();
     const ks = selCages();
     if (!ks.length) { $('comboBody').innerHTML = '<p class="meta">Select a cell to see the combinations for its cage.</p>'; return; }
-    $('comboBody').innerHTML = ks.slice(0, MAX_CAGES).map(cageBlock).join('') +
-      (ks.length > MAX_CAGES ? '<p class="meta">+ ' + (ks.length - MAX_CAGES) + ' more cages. Select fewer cells to see them.</p>' : '');
+    // combinations only make sense for one cage; the Selection sum panel covers bigger selections
+    $('comboBody').innerHTML = ks.length === 1 ? cageBlock(ks[0])
+      : '<p class="meta">The selection covers ' + ks.length + ' cages. Select cells of a single cage to see its combinations.</p>';
   }
 
   // Adds up the cage sums of the selected cells (only cages that are fully selected count).
@@ -543,7 +543,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     const b = e.target.closest('.chip');
     if (b && b.dataset.k !== undefined) { toggle(struck[+b.dataset.k], b.dataset.c); updateSide(); }
   });
-  $('comboReset').onclick = () => { selCages().forEach(k => { struck[k] = new Set(); }); updateSide(); };
+  $('comboReset').onclick = () => { const ks = selCages(); if (ks.length === 1) struck[ks[0]] = new Set(); updateSide(); };
   $('comboHide').onclick = e => { const h = $('comboBody').hidden = !$('comboBody').hidden; e.target.textContent = h ? 'Show' : 'Hide'; };
   $('calcBody').addEventListener('click', e => { const b = e.target.closest('.chip'); if (b) { toggle(calcCrossed, b.dataset.c); updateCalc(); } });
   $('calcSum').oninput = $('calcSize').oninput = () => { calcCrossed = new Set(); updateCalc(); };
