@@ -5,12 +5,37 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sudoku</title>
 <style>
-:root{--bg:#e8edf2;--panel:#f7f9fb;--ink:#1b2a3b;--given:#1b2a3b;--user:#0f6f7e;--line:#9fb0c2;--thick:#1b2a3b;--sel:#bfe3e8;--rel:#dbe6ee;--same:#a9d6dd;--cage:#6b7f93;--bad:#c23b2e;--badbg:#f6d5d1;--muted:#5d6f82}
-@media(prefers-color-scheme:dark){:root{--bg:#141c25;--panel:#1c2733;--ink:#e6edf4;--given:#e6edf4;--user:#6cc7d6;--line:#3d4e60;--thick:#9fb0c2;--sel:#27505a;--rel:#243342;--same:#2f6270;--cage:#8fa2b5;--bad:#ff8b7e;--badbg:#4a2a28;--muted:#8fa2b5}}
+:root,[data-theme=light]{--bg:#e8edf2;--panel:#f7f9fb;--ink:#1b2a3b;--given:#1b2a3b;--user:#0f6f7e;--line:#9fb0c2;--thick:#1b2a3b;--sel:#bfe3e8;--rel:#dbe6ee;--same:#a9d6dd;--cage:#6b7f93;--bad:#c23b2e;--badbg:#f6d5d1;--muted:#5d6f82}
+[data-theme=dark]{--bg:#141c25;--panel:#1c2733;--ink:#e6edf4;--given:#e6edf4;--user:#6cc7d6;--line:#3d4e60;--thick:#9fb0c2;--sel:#27505a;--rel:#243342;--same:#2f6270;--cage:#8fa2b5;--bad:#ff8b7e;--badbg:#4a2a28;--muted:#8fa2b5}
+[data-theme=sage]{--bg:#e6ece3;--panel:#f6f8f3;--ink:#243024;--given:#243024;--user:#3d7a3a;--line:#a5b59f;--thick:#243024;--sel:#cfe6c4;--rel:#e0ebd9;--same:#b5d9a8;--cage:#6f8a68;--bad:#b3382c;--badbg:#f4d6d0;--muted:#5c6e58}
+[data-theme=rose]{--bg:#f3e6ea;--panel:#fdf6f8;--ink:#3a1f2b;--given:#3a1f2b;--user:#b0325f;--line:#cfa9b8;--thick:#3a1f2b;--sel:#f4c6d8;--rel:#f6dde6;--same:#efb3cc;--cage:#a06a82;--bad:#c0392b;--badbg:#f8d3cf;--muted:#7a5565}
+[data-theme=midnight]{--bg:#0f1a2b;--panel:#172640;--ink:#e3ecff;--given:#e3ecff;--user:#ffd166;--line:#34507a;--thick:#8fb0e8;--sel:#2b4f86;--rel:#1f3454;--same:#35609a;--cage:#7f9ccc;--bad:#ff8b7e;--badbg:#4a2a38;--muted:#8fa6cc}
+[hidden]{display:none!important}
 *{box-sizing:border-box}
 html,body{margin:0;min-height:100%}
 body{background:var(--bg);color:var(--ink);font-family:Georgia,"Iowan Old Style",serif;display:flex;justify-content:center;padding:16px}
-main{width:100%;max-width:460px}
+#layout{display:flex;gap:20px;align-items:flex-start;width:100%;max-width:460px}
+#layout.k{max-width:780px}
+main{flex:1;min-width:0;width:100%;max-width:460px}
+#theme{padding:4px 8px;font-size:.85rem}
+#side{width:290px;flex:none;display:flex;flex-direction:column;gap:14px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+.panel h2{margin:0 0 10px;font-size:1.05rem;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.panel h2 span{display:flex;gap:6px}
+.panel h2 button{padding:3px 8px;font-size:.8rem}
+.chips{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.chip{padding:6px 0;letter-spacing:.15em;font-size:1.05rem;font-weight:700;color:var(--user);background:var(--bg)}
+.chip.x{text-decoration:line-through;opacity:.4}
+.chip.off{opacity:.3}
+.sumrow{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:4px 0;border-bottom:1px solid var(--line);font-size:.9rem}
+.sumrow:last-child{border-bottom:0}
+.sumrow .big{font-size:1.4rem;color:var(--user)}
+.meta{color:var(--muted);margin:0 0 8px;font-size:.9rem}
+.calcIn{display:flex;gap:8px;margin-bottom:10px}
+.calcIn input{flex:1;min-width:0;font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
+.cg.on{border-style:solid}
+.cg.on.t{border-top-color:var(--user)}.cg.on.b{border-bottom-color:var(--user)}.cg.on.l{border-left-color:var(--user)}.cg.on.r{border-right-color:var(--user)}
+@media(max-width:820px){#layout.k{flex-direction:column;align-items:center;max-width:460px}#side{width:100%}}
 header{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px}
 h1{font-size:1.6rem;margin:0;letter-spacing:.02em}
 #timer{font-variant-numeric:tabular-nums;color:var(--muted);font-size:1.1rem}
@@ -33,10 +58,10 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
 .c.bad{color:var(--bad);background:var(--badbg)}
 .notes{pointer-events:none;position:absolute;inset:0;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);font-size:clamp(.5rem,2.4vw,.75rem);color:var(--muted);line-height:1;padding:2px}
 .notes span{display:flex;align-items:center;justify-content:center;border-radius:3px}
-.k .notes{padding:11px 2px 2px}
+.k .notes{padding:13px 2px 2px}
 .cg{position:absolute;inset:3px;pointer-events:none;border:1px dashed transparent}
 .cg.t{border-top-color:var(--cage)}.cg.b{border-bottom-color:var(--cage)}.cg.l{border-left-color:var(--cage)}.cg.r{border-right-color:var(--cage)}
-.sum{position:absolute;top:1px;left:3px;font-size:clamp(.5rem,2.2vw,.7rem);line-height:1;font-weight:400;color:var(--muted);pointer-events:none}
+.sum{position:absolute;top:1px;left:3px;font-size:clamp(.6rem,2.7vw,.82rem);line-height:1;font-weight:600;color:var(--muted);pointer-events:none}
 .notes span.hl{background:var(--user);color:var(--panel);font-weight:700}
 #pad{display:grid;grid-template-columns:repeat(9,1fr);gap:6px;margin-top:14px}
 #pad button{padding:10px 0;font-size:1.3rem}
@@ -50,8 +75,12 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
 </style>
 </head>
 <body>
+<div id="layout">
 <main>
-  <header><h1 id="title">Sudoku</h1><span id="timer" aria-label="Elapsed time">0:00</span></header>
+  <header><h1 id="title">Sudoku</h1><select id="theme" aria-label="Palette">
+    <option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option>
+    <option value="sage">Sage</option><option value="rose">Rose</option><option value="midnight">Midnight</option>
+  </select><span id="timer" aria-label="Elapsed time">0:00</span></header>
   <div class="bar">
     <select id="variant" aria-label="Variant">
       <option value="classic">Classic</option>
@@ -83,11 +112,30 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   </div>
   <p id="msg" role="status"></p>
 </main>
+<aside id="side" hidden>
+  <section class="panel">
+    <h2>Combinations <span><button id="comboHide">Hide</button><button id="comboReset">Reset</button></span></h2>
+    <div id="comboBody"></div>
+  </section>
+  <section class="panel">
+    <h2>Selection sum</h2>
+    <div id="sumBody"></div>
+  </section>
+  <section class="panel">
+    <h2>Calculator <button id="calcReset">Reset</button></h2>
+    <div class="calcIn">
+      <input id="calcSum" type="number" min="1" max="45" inputmode="numeric" placeholder="Sum" aria-label="Cage sum">
+      <input id="calcSize" type="number" min="1" max="9" inputmode="numeric" placeholder="Size" aria-label="Cage size">
+    </div>
+    <div id="calcBody"></div>
+  </section>
+</aside>
+</div>
 <script>
 (() => {
   const $ = id => document.getElementById(id);
   const boardEl = $('board'), msgEl = $('msg'), timerEl = $('timer');
-  let sol, given, cur, notes, undo = [], redo = [], sel = -1, multi = new Set(), dragging = false, noteMode = false, secs = 0, tick = null, won = false;
+  let sol, given, cur, notes, undo = [], redo = [], struck = {}, sel = -1, multi = new Set(), dragging = false, noteMode = false, secs = 0, tick = null, won = false;
 
   const rnd = n => Math.floor(Math.random() * n);
   const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = rnd(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
@@ -119,9 +167,20 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     $('title').textContent = TITLES[m];
     $('board').classList.toggle('k', m === 'killer');
   };
+  // All sets of `size` different digits that add up to `sum`.
+  const combos = (sum, size) => {
+    const out = [];
+    const rec = (start, left, rest, acc) => {
+      if (!left) { if (!rest) out.push(acc); return; }
+      for (let d = start; d <= 9 && d <= rest; d++) rec(d + 1, left - 1, rest - d, acc + d);
+    };
+    rec(1, size, sum, '');
+    return out;
+  };
   const applyCages = cg => {
     cages = cg; cageOf = Array(81).fill(-1);
-    cg.forEach((c, k) => c.cells.forEach(i => cageOf[i] = k));
+    // masks: each possible digit set for the cage, as a bitmask (4+4 for 8 is never in the list)
+    cg.forEach((c, k) => { c.cells.forEach(i => cageOf[i] = k); c.masks = combos(c.sum, c.cells.length).map(str => [...str].reduce((m, d) => m | 1 << d, 0)); });
     PEERS = buildPeers(mode, cg);
   };
   // Random cages of 1-4 orthogonally connected cells with distinct digits in the solution.
@@ -147,21 +206,21 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   const cageHtml = i => {
     if (!cageOf) return '';
     const k = cageOf[i], c = cages[k], d = j => cageOf[j] !== k;
-    const cls = [row(i) === 0 || d(i - 9) ? 't' : '', row(i) === 8 || d(i + 9) ? 'b' : '', col(i) === 0 || d(i - 1) ? 'l' : '', col(i) === 8 || d(i + 1) ? 'r' : ''].join(' ');
+    const cls = [multi.size === 1 && cageOf[sel] === k ? 'on' : '', row(i) === 0 || d(i - 9) ? 't' : '', row(i) === 8 || d(i + 9) ? 'b' : '', col(i) === 0 || d(i - 1) ? 'l' : '', col(i) === 8 || d(i + 1) ? 'r' : ''].join(' ');
     return '<i class="cg ' + cls + '"></i>' + (Math.min(...c.cells) === i ? '<b class="sum">' + c.sum + '</b>' : '');
   };
 
   function candidates(g, i) {
     const used = new Set(PEERS[i].map(j => g[j]));
     const cg = cageOf && cageOf[i] >= 0 ? cages[cageOf[i]] : null;
-    let placed = 0, k = 0;
-    if (cg) for (const j of cg.cells) { if (j === i) continue; if (g[j]) placed += g[j]; else k++; }
-    const out = [];
-    for (let v = 1; v <= 9; v++) {
-      if (used.has(v)) continue;
-      if (cg) { const rem = cg.sum - placed - v; if (rem < k * (k + 1) / 2 || rem > k * (19 - k) / 2) continue; }
-      out.push(v);
+    let have = 0, allowed = 0x3fe;
+    if (cg) {
+      for (const j of cg.cells) if (g[j]) have |= 1 << g[j];
+      allowed = 0;
+      for (const m of cg.masks) if ((m & have) === have) allowed |= m;
     }
+    const out = [];
+    for (let v = 1; v <= 9; v++) if (!used.has(v) && allowed & (1 << v)) out.push(v);
     return out;
   }
 
@@ -414,8 +473,79 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     $('notes').textContent = 'Notes: ' + (noteMode ? 'on' : auto ? 'auto' : 'off');
     $('notes').setAttribute('aria-pressed', noteMode || auto);
     $('undo').disabled = !undo.length; $('redo').disabled = !redo.length;
+    updateSide();
     save();
   }
+
+  // ---- Killer side panels: cage combinations + calculator ----
+  const chips = (list, crossed, fits) => list.length
+    ? '<div class="chips">' + list.map(c => '<button class="chip' + (crossed.has(c) ? ' x' : '') + (fits && !fits(c) ? ' off' : '') + '" data-c="' + c + '">' + c + '</button>').join('') + '</div>'
+    : '<p class="meta">No combinations.</p>';
+  const selCage = () => multi.size === 1 && cageOf && cageOf[sel] >= 0 ? cageOf[sel] : -1;
+
+  function updateSide() {
+    const on = mode === 'killer';
+    $('side').hidden = !on; $('layout').classList.toggle('k', on);
+    if (!on) return;
+    updateSum();
+    const k = selCage();
+    if (k < 0) { $('comboBody').innerHTML = '<p class="meta">Select a cell to see the combinations for its cage.</p>'; return; }
+    const c = cages[k], placed = c.cells.map(i => cur[i]).filter(Boolean);
+    const crossed = struck[k] || (struck[k] = new Set());
+    const left = c.cells.length - placed.length, rest = c.sum - placed.reduce((a, b) => a + b, 0);
+    const list = combos(c.sum, c.cells.length), fits = cmb => placed.every(d => cmb.includes(d));
+    $('comboBody').innerHTML = '<p class="meta">Sum ' + c.sum + ' · ' + c.cells.length + (c.cells.length === 1 ? ' cell' : ' cells') +
+      (placed.length && left ? ' · ' + rest + ' left in ' + left + (left === 1 ? ' cell' : ' cells') : '') + '</p>' +
+      (list.some(fits) ? '' : '<p class="meta">None of these fit the digits already in the cage.</p>') + chips(list, crossed, fits);
+  }
+  // Adds up the cage sums of the selected cells (only cages that are fully selected count).
+  function updateSum() {
+    const cells = [...multi], body = $('sumBody');
+    if (!cells.length) { body.innerHTML = '<p class="meta">Select cells (drag, or Shift/Ctrl-click) to add up their cages.</p>'; return; }
+    const per = {};
+    cells.forEach(i => { per[cageOf[i]] = (per[cageOf[i]] || 0) + 1; });
+    let whole = 0, wholeN = 0, partN = 0, partCells = 0;
+    for (const k in per) {
+      if (per[k] === cages[k].cells.length) { whole += cages[k].sum; wholeN++; } else { partN++; partCells += per[k]; }
+    }
+    const entered = cells.reduce((a, i) => a + cur[i], 0), set = new Set(cells);
+    const isUnit = UNITS.some(u => u.length === cells.length && u.every(i => set.has(i)));
+    const r = (a, b, big) => '<div class="sumrow"><span>' + a + '</span><b' + (big ? ' class="big"' : '') + '>' + b + '</b></div>';
+    body.innerHTML = r(cells.length === 1 ? '1 cell' : cells.length + ' cells', '') +
+      r('Whole cages (' + wholeN + ')', whole, true) +
+      (partN ? r('Partial cages (' + partN + ', ' + partCells + (partCells === 1 ? ' cell' : ' cells') + ')', 'not counted') : '') +
+      (entered ? r('Digits entered', entered) : '') +
+      (isUnit ? r('Row / column / box total', 45) + (partN ? r('Cells in partial cages add up to', 45 - whole) : '') : '');
+  }
+  let calcCrossed = new Set();
+  function updateCalc() {
+    const sum = +$('calcSum').value, size = +$('calcSize').value;
+    $('calcBody').innerHTML = sum > 0 && size >= 1 && size <= 9
+      ? chips(combos(sum, size), calcCrossed)
+      : '<p class="meta">Enter cage sum and size to see possible combinations.</p>';
+  }
+  const toggle = (set, c) => set.has(c) ? set.delete(c) : set.add(c);
+  $('comboBody').addEventListener('click', e => {
+    const b = e.target.closest('.chip'), k = selCage();
+    if (b && k >= 0) { toggle(struck[k], b.dataset.c); updateSide(); }
+  });
+  $('comboReset').onclick = () => { const k = selCage(); if (k >= 0) struck[k] = new Set(); updateSide(); };
+  $('comboHide').onclick = e => { const h = $('comboBody').hidden = !$('comboBody').hidden; e.target.textContent = h ? 'Show' : 'Hide'; };
+  $('calcBody').addEventListener('click', e => { const b = e.target.closest('.chip'); if (b) { toggle(calcCrossed, b.dataset.c); updateCalc(); } });
+  $('calcSum').oninput = $('calcSize').oninput = () => { calcCrossed = new Set(); updateCalc(); };
+  $('calcReset').onclick = () => { $('calcSum').value = ''; $('calcSize').value = ''; calcCrossed = new Set(); updateCalc(); };
+  updateCalc();
+
+  // ---- Palette ----
+  const dark = matchMedia('(prefers-color-scheme: dark)');
+  const applyTheme = t => { document.documentElement.dataset.theme = t === 'auto' ? (dark.matches ? 'dark' : 'light') : t; };
+  let theme = 'auto';
+  try { theme = localStorage.getItem('sudoku-theme') || 'auto'; } catch (e) {}
+  $('theme').value = theme;
+  if (!$('theme').value) $('theme').value = theme = 'auto';
+  applyTheme(theme);
+  $('theme').onchange = e => { try { localStorage.setItem('sudoku-theme', e.target.value); } catch (x) {} applyTheme(e.target.value); };
+  dark.addEventListener('change', () => { if ($('theme').value === 'auto') applyTheme('auto'); });
 
   const targets = () => [...multi].filter(i => !given[i]);
   function place(i, v) {
@@ -496,7 +626,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   function load(d) {
     ({ sol, given, cur, secs } = d);
     notes = d.notes.map(a => new Set(a));
-    undo = []; redo = [];
+    undo = []; redo = []; struck = {};
     $('diff').value = d.diff;
     if (!$('diff').value) $('diff').value = '2';
     setMode(d.mode || (d.knight ? 'knight' : 'classic'));
@@ -511,7 +641,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
       if (mode === 'killer') applyCages(gen.cages);
       sol = full; given = puzzle.map(v => !!v); cur = puzzle.slice();
       notes = Array.from({ length: 81 }, () => new Set());
-      sel = -1; multi = new Set(); secs = 0; won = false; undo = []; redo = [];
+      sel = -1; multi = new Set(); secs = 0; won = false; undo = []; redo = []; struck = {};
       msgEl.textContent = gen.lv === T ? '' : 'Closest match found: ' + NAMES[gen.lv - 1] + '.';
       render(); startTimer();
     }, 20);
