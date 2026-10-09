@@ -14,11 +14,13 @@
 *{box-sizing:border-box}
 html,body{margin:0;min-height:100%}
 body{background:var(--bg);color:var(--ink);font-family:Georgia,"Iowan Old Style",serif;display:flex;justify-content:center;padding:16px}
-#layout{display:flex;gap:20px;align-items:flex-start;width:100%;max-width:460px}
-#layout.k{max-width:780px}
-main{flex:1;min-width:0;width:100%;max-width:460px}
+#layout{display:grid;column-gap:20px;align-items:start;justify-content:center;width:100%;max-width:460px;position:relative;
+  grid-template-columns:minmax(0,460px);grid-template-areas:"head" "board" "left" "side"}
+#head{grid-area:head;min-width:0}
+#stage{grid-area:board;min-width:0}
+#controls{grid-area:left;min-width:0}
 #theme{padding:4px 8px;font-size:.85rem}
-#side{width:290px;flex:none;display:flex;flex-direction:column;gap:14px}
+#side{grid-area:side;display:flex;flex-direction:column;gap:14px;margin-top:16px;min-width:0}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
 .panel h2{margin:0 0 10px;font-size:1.05rem;display:flex;align-items:center;justify-content:space-between;gap:8px}
 .panel h2 span{display:flex;gap:6px}
@@ -42,7 +44,6 @@ main{flex:1;min-width:0;width:100%;max-width:460px}
 .calcIn input{flex:1;min-width:0;font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
 .cg.on{border-style:solid}
 .cg.on.t{border-top-color:var(--user)}.cg.on.b{border-bottom-color:var(--user)}.cg.on.l{border-left-color:var(--user)}.cg.on.r{border-right-color:var(--user)}
-@media(max-width:820px){#layout.k{flex-direction:column;align-items:center;max-width:460px}#side{width:100%}}
 header{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px}
 h1{font-size:1.6rem;margin:0;letter-spacing:.02em}
 #timer{font-variant-numeric:tabular-nums;color:var(--muted);font-size:1.1rem}
@@ -80,11 +81,26 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
 #msg{min-height:1.5em;margin:12px 0 0;text-align:center;color:var(--muted)}
 #msg.win{color:var(--user);font-weight:700}
 .sr{position:absolute;left:-9999px}
+/* medium screens: Killer panels sit to the right of the board */
+@media(min-width:820px){
+  #layout.k{max-width:780px;grid-template-columns:minmax(0,460px) 290px;grid-template-areas:"head side" "board side" "left side"}
+  #layout.k #side{margin-top:0}
+}
+/* wide screens: controls on the left of the board, board stays centred, Killer panels on the right */
+@media(min-width:1100px){
+  #layout,#layout.k{max-width:1320px;grid-template-columns:minmax(0,1fr) 460px minmax(0,1fr);grid-template-areas:". head side" "left board side"}
+  #controls{justify-self:end;width:250px}
+  #pad{grid-template-columns:repeat(3,1fr);margin-top:0}
+  #pad button{padding:16px 0;font-size:1.5rem}
+  .tools{flex-wrap:wrap}
+  .tools button{flex:1 1 calc(50% - 4px)}
+  #side,#layout.k #side{position:absolute;width:290px;margin-top:0;top:0;left:0}
+}
 </style>
 </head>
 <body>
 <div id="layout">
-<main>
+<div id="head">
   <header><h1 id="title">Sudoku</h1><select id="theme" aria-label="Palette">
     <option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option>
     <option value="sage">Sage</option><option value="rose">Rose</option><option value="midnight">Midnight</option>
@@ -109,7 +125,12 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     <button id="check">Check</button>
   </div>
   <p id="rule" class="meta" hidden></p>
+</div>
+<main id="stage">
   <div class="bw"><div id="board" role="grid" aria-label="Sudoku board"></div><div id="dots" aria-hidden="true"></div></div>
+  <p id="msg" role="status"></p>
+</main>
+<section id="controls">
   <div id="pad"></div>
   <div class="tools">
     <button id="undo" title="Undo (Backspace or Ctrl+Z)">Undo</button>
@@ -121,8 +142,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     <button id="fill" title="Fill notes (F)">Fill notes</button>
     <button id="hint">Hint</button>
   </div>
-  <p id="msg" role="status"></p>
-</main>
+</section>
 <aside id="side" hidden>
   <section class="panel">
     <h2>Combinations <span><button id="comboHide">Hide</button><button id="comboReset">Reset</button></span></h2>
