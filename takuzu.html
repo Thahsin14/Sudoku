@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Takuzu</title>
+<style>
+:root,[data-theme=light]{--bg:#e8edf2;--panel:#f7f9fb;--ink:#1b2a3b;--given:#1b2a3b;--user:#0f6f7e;--line:#9fb0c2;--thick:#1b2a3b;--sel:#bfe3e8;--rel:#dbe6ee;--same:#a9d6dd;--cage:#6b7f93;--bad:#c23b2e;--badbg:#f6d5d1;--muted:#5d6f82}
+[data-theme=dark]{--bg:#141c25;--panel:#1c2733;--ink:#e6edf4;--given:#e6edf4;--user:#6cc7d6;--line:#3d4e60;--thick:#9fb0c2;--sel:#27505a;--rel:#243342;--same:#2f6270;--cage:#8fa2b5;--bad:#ff8b7e;--badbg:#4a2a28;--muted:#8fa2b5}
+[data-theme=sage]{--bg:#e6ece3;--panel:#f6f8f3;--ink:#243024;--given:#243024;--user:#3d7a3a;--line:#a5b59f;--thick:#243024;--sel:#cfe6c4;--rel:#e0ebd9;--same:#b5d9a8;--cage:#6f8a68;--bad:#b3382c;--badbg:#f4d6d0;--muted:#5c6e58}
+[data-theme=rose]{--bg:#f3e6ea;--panel:#fdf6f8;--ink:#3a1f2b;--given:#3a1f2b;--user:#b0325f;--line:#cfa9b8;--thick:#3a1f2b;--sel:#f4c6d8;--rel:#f6dde6;--same:#efb3cc;--cage:#a06a82;--bad:#c0392b;--badbg:#f8d3cf;--muted:#7a5565}
+[data-theme=midnight]{--bg:#0f1a2b;--panel:#172640;--ink:#e3ecff;--given:#e3ecff;--user:#ffd166;--line:#34507a;--thick:#8fb0e8;--sel:#2b4f86;--rel:#1f3454;--same:#35609a;--cage:#7f9ccc;--bad:#ff8b7e;--badbg:#4a2a38;--muted:#8fa6cc}
+[hidden]{display:none!important}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{background:var(--bg);color:var(--ink);font-family:Georgia,"Iowan Old Style",serif;display:flex;justify-content:center;padding:16px}
+main{width:100%;max-width:480px}
+header{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:12px}
+h1{font-size:1.6rem;margin:0;letter-spacing:.02em}
+.nav{color:var(--user);text-decoration:none;font-size:.9rem}
+.nav:hover{text-decoration:underline}
+#timer{font-variant-numeric:tabular-nums;color:var(--muted);font-size:1.1rem}
+select,button{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 12px;cursor:pointer}
+button:hover:not(:disabled),select:hover{border-color:var(--thick)}
+button:disabled{opacity:.4;cursor:default}
+:focus-visible{outline:3px solid var(--user);outline-offset:1px}
+#theme{padding:4px 8px;font-size:.85rem}
+.bar,.tools{display:flex;gap:8px;margin-bottom:12px}
+.bar>*,.tools>*{flex:1;min-width:0}
+.rule{color:var(--muted);font-size:.9rem;margin:0 0 12px}
+#board{--n:8;display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));grid-template-rows:repeat(var(--n),minmax(0,1fr));width:100%;aspect-ratio:1;background:var(--panel);border:3px solid var(--thick);user-select:none;touch-action:manipulation}
+.c{min-width:0;min-height:0;overflow:hidden;display:flex;align-items:center;justify-content:center;padding:0;border:0;border-radius:0;background:transparent;color:var(--user);
+  font-size:calc(min(92vw,480px) / var(--n) * .55);border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+.c.v0{background:var(--rel)}
+.c.v1{background:var(--same)}
+.c.g{color:var(--given);font-weight:700}
+.c.r{box-shadow:inset 0 0 0 100px color-mix(in srgb,var(--user) 8%,transparent)}
+.c.sel{box-shadow:inset 0 0 0 3px var(--user)}
+.c.bad{color:var(--bad);background:var(--badbg)}
+#msg{min-height:1.5em;margin:12px 0 0;text-align:center;color:var(--muted)}
+#msg.win{color:var(--user);font-weight:700}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Takuzu</h1>
+    <a class="nav" href="index.html">&larr; Sudoku</a>
+    <select id="theme" aria-label="Palette">
+      <option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option>
+      <option value="sage">Sage</option><option value="rose">Rose</option><option value="midnight">Midnight</option>
+    </select>
+    <span id="timer" aria-label="Elapsed time">0:00</span>
+  </header>
+  <div class="bar">
+    <select id="size" aria-label="Grid size">
+      <option value="6">6 &times; 6</option><option value="8" selected>8 &times; 8</option>
+      <option value="10">10 &times; 10</option><option value="12">12 &times; 12</option>
+    </select>
+    <select id="level" aria-label="Difficulty">
+      <option value="1">Easy</option><option value="2" selected>Medium</option>
+      <option value="3">Hard</option><option value="4">Expert</option>
+    </select>
+    <button id="new">New game</button>
+    <button id="check">Check</button>
+  </div>
+  <p class="rule">Fill the grid with 0s and 1s. No more than two equal digits side by side, every row and column has as many 0s as 1s, and no two rows (or two columns) are identical.</p>
+  <div id="board" role="grid" aria-label="Takuzu board"></div>
+  <div class="tools" style="margin-top:12px">
+    <button id="undo" title="Undo (Backspace or Ctrl+Z)">Undo</button>
+    <button id="redo" title="Redo (Ctrl+Y)">Redo</button>
+    <button id="hint" title="Hint (H)">Hint</button>
+  </div>
+  <p id="msg" role="status"></p>
+</main>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const boardEl = $('board'), msgEl = $('msg'), timerEl = $('timer');
+  let n = 8, sol, given, cur, undo = [], redo = [], sel = -1, secs = 0, tick = null, won = false;
+  const rnd = k => Math.floor(Math.random() * k);
+  const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = rnd(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+
+  // ---- rules ----------------------------------------------------------------
+  // Can value v go in cell i without making three in a row or too many of v in its row/column?
+  function ok(g, i, v) {
+    const r = Math.floor(i / n), c = i % n, h = n / 2;
+    const at = (rr, cc) => rr < 0 || cc < 0 || rr >= n || cc >= n ? -2 : g[rr * n + cc];
+    for (const [dr, dc] of [[0, 1], [1, 0]]) {
+      const a = at(r - 2 * dr, c - 2 * dc), b = at(r - dr, c - dc), d = at(r + dr, c + dc), e = at(r + 2 * dr, c + 2 * dc);
+      if ((a === v && b === v) || (b === v && d === v) || (d === v && e === v)) return false;
+    }
+    let rc = 0, cc = 0;
+    for (let k = 0; k < n; k++) { if (k !== c && g[r * n + k] === v) rc++; if (k !== r && g[k * n + c] === v) cc++; }
+    return rc < h && cc < h;
+  }
+  // two completed rows (or columns) that are identical
+  function dupLines(g) {
+    const bad = new Set();
+    for (const byCol of [false, true]) {
+      const seen = {};
+      for (let a = 0; a < n; a++) {
+        let s = '';
+        for (let b = 0; b < n; b++) { const v = byCol ? g[b * n + a] : g[a * n + b]; if (v < 0) { s = null; break; } s += v; }
+        if (s === null) continue;
+        if (seen[s] !== undefined) [seen[s], a].forEach(l => { for (let b = 0; b < n; b++) bad.add(byCol ? b * n + l : l * n + b); });
+        else seen[s] = a;
+      }
+    }
+    return bad;
+  }
+  // cells that currently break a rule
+  function errors(g) {
+    const bad = dupLines(g), h = n / 2;
+    for (let i = 0; i < n * n; i++) {
+      if (g[i] < 0) continue;
+      const r = Math.floor(i / n), c = i % n;
+      for (const [dr, dc] of [[0, 1], [1, 0]]) {
+        const j = i + dr * n + dc, k = j + dr * n + dc;
+        if (r + 2 * dr < n && c + 2 * dc < n && g[j] === g[i] && g[k] === g[i]) { bad.add(i); bad.add(j); bad.add(k); }
+      }
+    }
+    for (let a = 0; a < n; a++) for (const v of [0, 1]) {
+      const row = [], col = [];
+      for (let b = 0; b < n; b++) { if (g[a * n + b] === v) row.push(a * n + b); if (g[b * n + a] === v) col.push(b * n + a); }
+      if (row.length > h) row.forEach(i => bad.add(i));
+      if (col.length > h) col.forEach(i => bad.add(i));
+    }
+    return bad;
+  }
+
+  // ---- solver / generator ---------------------------------------------------
+  function propagate(g) {
+    for (let ch = true; ch;) {
+      ch = false;
+      for (let i = 0; i < n * n; i++) {
+        if (g[i] !== -1) continue;
+        const a = ok(g, i, 0), b = ok(g, i, 1);
+        if (!a && !b) return false;
+        if (a !== b) { g[i] = a ? 0 : 1; ch = true; }
+      }
+    }
+    return dupLines(g).size === 0;
+  }
+  let budget = Infinity;
+  function count(g, limit) {            // number of solutions, up to `limit`
+    if (--budget < 0) return limit;     // too slow to decide: treat as not unique
+    if (!propagate(g)) return 0;
+    const i = g.indexOf(-1);
+    if (i < 0) return 1;
+    let t = 0;
+    for (const v of [0, 1]) {
+      if (!ok(g, i, v)) continue;
+      const h = g.slice(); h[i] = v;
+      t += count(h, limit - t);
+      if (t >= limit) break;
+    }
+    return t;
+  }
+  function makeSolution() {
+    for (;;) {
+      const g = Array(n * n).fill(-1);
+      let nodes = 0;
+      const fill = i => {
+        if (++nodes > 60000) return false;
+        if (i === n * n) return true;
+        for (const v of Math.random() < .5 ? [0, 1] : [1, 0]) {
+          if (!ok(g, i, v)) continue;
+          g[i] = v;
+          if (!((i + 1) % n === 0 && dupLines(g).size) && fill(i + 1)) return true;
+          g[i] = -1;
+        }
+        return false;
+      };
+      if (fill(0) && dupLines(g).size === 0) return g;
+    }
+  }
+  const SHARE = { 1: .55, 2: .45, 3: .38, 4: 0 };   // share of cells left as givens (0 = as few as stay unique)
+  function makePuzzle(level) {
+    const sol = makeSolution(), g = sol.slice(), t0 = Date.now();
+    const target = Math.round(n * n * SHARE[level]);
+    let left = n * n;
+    for (const i of shuffle([...Array(n * n).keys()])) {
+      if (left <= target || Date.now() - t0 > 2000) break;
+      const keep = g[i]; g[i] = -1;
+      budget = 20000;
+      if (count(g.slice(), 2) !== 1) g[i] = keep; else left--;
+    }
+    budget = Infinity;
+    return { sol, g };
+  }
+
+  // ---- game -----------------------------------------------------------------
+  function build() {
+    boardEl.style.setProperty('--n', n);
+    boardEl.innerHTML = '';
+    for (let i = 0; i < n * n; i++) {
+      const b = document.createElement('button');
+      b.className = 'c'; b.dataset.i = i; b.setAttribute('role', 'gridcell');
+      b.addEventListener('click', () => { sel = i; cycle(i); });
+      boardEl.appendChild(b);
+    }
+  }
+  function render() {
+    const bad = errors(cur);
+    [...boardEl.children].forEach((el, i) => {
+      const r = Math.floor(i / n), c = i % n;
+      el.className = 'c' + (cur[i] >= 0 ? ' v' + cur[i] : '') + (given[i] ? ' g' : '') + (bad.has(i) && !given[i] ? ' bad' : '');
+      if (sel >= 0 && i !== sel && (r === Math.floor(sel / n) || c === sel % n)) el.classList.add('r');
+      if (i === sel) el.classList.add('sel');
+      el.textContent = cur[i] >= 0 ? cur[i] : '';
+      el.setAttribute('aria-label', 'Row ' + (r + 1) + ' column ' + (c + 1) + ', ' + (cur[i] >= 0 ? cur[i] : 'empty'));
+    });
+    $('undo').disabled = !undo.length; $('redo').disabled = !redo.length;
+    save();
+  }
+  function change(i, v) {
+    if (won || given[i] || cur[i] === v) return;
+    undo.push(cur.slice()); if (undo.length > 500) undo.shift();
+    redo = [];
+    cur[i] = v; msgEl.textContent = ''; msgEl.className = '';
+    render(); checkWin();
+  }
+  const cycle = i => change(i, cur[i] === -1 ? 0 : cur[i] === 0 ? 1 : -1);
+  function checkWin() {
+    if (cur.every(v => v >= 0) && errors(cur).size === 0) {
+      won = true; clearInterval(tick);
+      msgEl.textContent = 'Solved in ' + fmt(secs) + '.'; msgEl.className = 'win';
+      localStorage.removeItem('takuzu');
+    }
+  }
+  function undoMove() { if (won || !undo.length) return; redo.push(cur.slice()); cur = undo.pop(); render(); }
+  function redoMove() { if (won || !redo.length) return; undo.push(cur.slice()); cur = redo.pop(); render(); }
+  function hint() {
+    if (won) return;
+    const open = [...Array(n * n).keys()].filter(i => !given[i] && cur[i] !== sol[i]);
+    const empty = open.filter(i => cur[i] < 0), pool = empty.length ? empty : open;
+    if (!pool.length) return;
+    const i = pool[rnd(pool.length)];
+    sel = i; change(i, sol[i]);
+    if (!won) msgEl.textContent = 'Hint: row ' + (Math.floor(i / n) + 1) + ', column ' + (i % n + 1) + '.';
+  }
+  const fmt = s => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  function startTimer() {
+    clearInterval(tick); timerEl.textContent = fmt(secs);
+    tick = setInterval(() => { secs++; timerEl.textContent = fmt(secs); if (secs % 5 === 0) save(); }, 1000);
+  }
+  function save() {
+    if (won) return;
+    try { localStorage.setItem('takuzu', JSON.stringify({ n, sol, given, cur, secs, level: $('level').value })); } catch (e) {}
+  }
+  function newGame() {
+    msgEl.className = ''; msgEl.textContent = 'Generating…';
+    setTimeout(() => {
+      n = +$('size').value;
+      const { sol: s, g } = makePuzzle(+$('level').value);
+      sol = s; cur = g.slice(); given = g.map(v => v >= 0);
+      undo = []; redo = []; sel = -1; secs = 0; won = false;
+      build(); msgEl.textContent = ''; render(); startTimer();
+    }, 20);
+  }
+
+  $('new').onclick = newGame;
+  $('undo').onclick = undoMove;
+  $('redo').onclick = redoMove;
+  $('hint').onclick = hint;
+  $('check').onclick = () => {
+    if (won) return;
+    const wrong = cur.filter((v, i) => v >= 0 && v !== sol[i]).length;
+    msgEl.className = '';
+    msgEl.textContent = wrong ? wrong + (wrong === 1 ? ' cell is' : ' cells are') + ' wrong.' : 'No mistakes so far.';
+  };
+  document.addEventListener('keydown', e => {
+    if (/^(SELECT|INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
+    if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+      const k = e.key.toLowerCase();
+      if (k === 'z') { e.preventDefault(); e.shiftKey ? redoMove() : undoMove(); }
+      if (k === 'y') { e.preventDefault(); redoMove(); }
+      return;
+    }
+    if (e.key === '0' || e.key === '1') { if (sel >= 0) change(sel, cur[sel] === +e.key ? -1 : +e.key); }
+    else if (e.key === ' ' || e.key === 'Enter') { if (sel >= 0) { e.preventDefault(); cycle(sel); } }
+    else if (e.key === 'Backspace') { e.preventDefault(); undoMove(); }
+    else if (e.key === 'Delete' || e.key === 'c' || e.key === 'C') { if (sel >= 0) change(sel, -1); }
+    else if (e.key === 'h' || e.key === 'H') hint();
+    else if (e.key === 'Escape') { sel = -1; render(); }
+    else if (e.key.startsWith('Arrow')) {
+      e.preventDefault();
+      if (sel < 0) sel = 0;
+      else {
+        const r = Math.floor(sel / n), c = sel % n;
+        if (e.key === 'ArrowUp') sel = ((r + n - 1) % n) * n + c;
+        if (e.key === 'ArrowDown') sel = ((r + 1) % n) * n + c;
+        if (e.key === 'ArrowLeft') sel = r * n + (c + n - 1) % n;
+        if (e.key === 'ArrowRight') sel = r * n + (c + 1) % n;
+      }
+      render(); boardEl.children[sel].focus();
+    }
+  });
+
+  // palette (shared with the Sudoku page)
+  const dark = matchMedia('(prefers-color-scheme: dark)');
+  const applyTheme = t => { document.documentElement.dataset.theme = t === 'auto' ? (dark.matches ? 'dark' : 'light') : t; };
+  let theme = 'auto';
+  try { theme = localStorage.getItem('sudoku-theme') || 'auto'; } catch (e) {}
+  $('theme').value = theme;
+  if (!$('theme').value) $('theme').value = theme = 'auto';
+  applyTheme(theme);
+  $('theme').onchange = e => { try { localStorage.setItem('sudoku-theme', e.target.value); } catch (x) {} applyTheme(e.target.value); };
+  dark.addEventListener('change', () => { if ($('theme').value === 'auto') applyTheme('auto'); });
+
+  try {
+    const d = JSON.parse(localStorage.getItem('takuzu'));
+    if (d && d.cur && d.cur.length === d.n * d.n) {
+      ({ n, sol, given, cur, secs } = d);
+      $('size').value = n; $('level').value = d.level;
+      build(); render(); startTimer(); return;
+    }
+  } catch (e) {}
+  newGame();
+})();
+</script>
+</body>
+</html>
