@@ -96,6 +96,8 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   .tools button{flex:1 1 calc(50% - 4px)}
   #side,#layout.k #side{position:absolute;width:290px;margin-top:0;top:0;left:0}
 }
+/* with a keyboard and mouse the on-screen pad and buttons are not needed (keys 1-9, C, F, H, Backspace) */
+@media(hover:hover) and (pointer:fine){#controls{display:none}}
 </style>
 </head>
 <body>
@@ -128,19 +130,18 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
 </div>
 <main id="stage">
   <div class="bw"><div id="board" role="grid" aria-label="Sudoku board"></div><div id="dots" aria-hidden="true"></div></div>
+  <div class="tools" id="undoBar">
+    <button id="undo" title="Undo (Backspace or Ctrl+Z)">Undo</button>
+    <button id="redo" title="Redo (Ctrl+Y)">Redo</button>
+  </div>
   <p id="msg" role="status"></p>
 </main>
 <section id="controls">
   <div id="pad"></div>
   <div class="tools">
-    <button id="undo" title="Undo (Backspace or Ctrl+Z)">Undo</button>
-    <button id="redo" title="Redo (Ctrl+Y)">Redo</button>
-  </div>
-  <div class="tools">
-    <button id="notes" title="Toggle notes (X)" aria-pressed="false">Notes: off</button>
     <button id="erase" title="Clear cells (C)">Erase</button>
     <button id="fill" title="Fill notes (F)">Fill notes</button>
-    <button id="hint">Hint</button>
+    <button id="hint" title="Hint (H)">Hint</button>
   </div>
 </section>
 <aside id="side" hidden>
@@ -166,7 +167,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
 (() => {
   const $ = id => document.getElementById(id);
   const boardEl = $('board'), msgEl = $('msg'), timerEl = $('timer');
-  let sol, given, cur, notes, undo = [], redo = [], struck = {}, sel = -1, multi = new Set(), dragging = false, noteMode = false, secs = 0, tick = null, won = false;
+  let sol, given, cur, notes, undo = [], redo = [], struck = {}, sel = -1, multi = new Set(), dragging = false, secs = 0, tick = null, won = false;
 
   const rnd = n => Math.floor(Math.random() * n);
   const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = rnd(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
@@ -566,6 +567,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   }
 
   function render() {
+    derive();
     const bad = conflicts();
     const single = multi.size === 1;
     const sv = single ? cur[sel] : 0;
@@ -583,9 +585,6 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
       el.setAttribute('aria-label', 'Row ' + (row(i) + 1) + ' column ' + (col(i) + 1) + ', ' + (cur[i] || 'empty'));
     });
     [...$('pad').children].forEach(b => b.classList.toggle('done', counts[b.dataset.v] >= 9));
-    const auto = multi.size > 1;
-    $('notes').textContent = 'Notes: ' + (noteMode ? 'on' : auto ? 'auto' : 'off');
-    $('notes').setAttribute('aria-pressed', noteMode || auto);
     $('undo').disabled = !undo.length; $('redo').disabled = !redo.length;
     updateSide(); updateDots();
     save();
@@ -672,13 +671,12 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   dark.addEventListener('change', () => { if ($('theme').value === 'auto') applyTheme('auto'); });
 
   const targets = () => [...multi].filter(i => !given[i]);
-  function place(i, v) {
-    cur[i] = v; notes[i].clear();
-    if (v) PEERS[i].forEach(j => notes[j].delete(v));
-  }
+  function place(i, v) { notes[i] = new Set(v ? [v] : []); cur[i] = v; }
+  // No notes/value split: a cell holding exactly one note IS that digit.
+  function derive() { for (let i = 0; i < 81; i++) if (!given[i]) cur[i] = notes[i].size === 1 ? [...notes[i]][0] : 0; }
 
   // Undo / redo: snapshots of values and notes, taken around every change.
-  const snapshot = () => ({ cur: cur.slice(), notes: notes.map(x => [...x]) });
+  const snapshot = () => { derive(); return { cur: cur.slice(), notes: notes.map(x => [...x]) }; };
   const restore = sn => { cur = sn.cur.slice(); notes = sn.notes.map(a => new Set(a)); };
   function commit(before) {
     if (JSON.stringify(before) === JSON.stringify(snapshot())) return;
@@ -688,20 +686,15 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   function undoMove() { if (won || !undo.length) return; redo.push(snapshot()); restore(undo.pop()); render(); }
   function redoMove() { if (won || !redo.length) return; undo.push(snapshot()); restore(redo.pop()); render(); }
 
+  // Digits always go into the cell's notes (toggled). With several cells selected, the digit is added to
+  // all of them, or removed from all if they already have it.
   function enter(v) {
     const t = targets();
     if (won || !t.length) return;
     msgEl.textContent = ''; msgEl.className = '';
     const before = snapshot();
-    if (noteMode || multi.size > 1) {
-      const e = t.filter(i => !cur[i]);
-      if (!e.length) return;
-      const all = e.every(i => notes[i].has(v));
-      e.forEach(i => all ? notes[i].delete(v) : notes[i].add(v));
-    } else {
-      const all = t.every(i => cur[i] === v);
-      t.forEach(i => all ? place(i, 0) : place(i, v));
-    }
+    const all = t.every(i => notes[i].has(v));
+    t.forEach(i => all ? notes[i].delete(v) : notes[i].add(v));
     commit(before); render(); checkWin();
   }
 
@@ -709,7 +702,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     const t = targets();
     if (won || !t.length) return;
     const before = snapshot();
-    t.forEach(i => { cur[i] = 0; notes[i].clear(); });
+    t.forEach(i => notes[i].clear());
     commit(before); render();
   }
 
@@ -750,6 +743,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   function load(d) {
     ({ sol, given, cur, secs } = d);
     notes = d.notes.map(a => new Set(a));
+    cur.forEach((v, i) => { if (v && !given[i] && !notes[i].size) notes[i].add(v); });
     undo = []; redo = []; struck = {};
     $('diff').value = d.diff;
     if (!$('diff').value) $('diff').value = '2';
@@ -781,8 +775,9 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     msgEl.textContent = wrong ? wrong + (wrong === 1 ? ' cell is' : ' cells are') + ' wrong.' : 'No mistakes so far.';
   };
   // Hint reveals a random unsolved cell (empty ones first), whatever is selected.
-  $('hint').onclick = () => {
+  function giveHint() {
     if (won) return;
+    derive();
     const open = [...Array(81).keys()].filter(i => !given[i] && cur[i] !== sol[i]);
     const empty = open.filter(i => !cur[i]), pool = empty.length ? empty : open;
     if (!pool.length) return;
@@ -791,13 +786,13 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     sel = i; multi = new Set([i]);
     msgEl.className = ''; msgEl.textContent = 'Hint: row ' + (row(i) + 1) + ', column ' + (col(i) + 1) + '.';
     commit(before); render(); checkWin();
-  };
+  }
+  $('hint').onclick = giveHint;
   $('erase').onclick = erase;
   $('variant').onchange = () => syncLevels($('variant').value);
   $('undo').onclick = undoMove;
   $('redo').onclick = redoMove;
   $('fill').onclick = fillNotes;
-  $('notes').onclick = () => { noteMode = !noteMode; render(); };
 
   document.addEventListener('keydown', e => {
     if ((e.ctrlKey || e.metaKey) && !e.altKey) {
@@ -809,7 +804,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     if (/^[1-9]$/.test(e.key)) enter(+e.key);
     else if (e.key === 'Backspace') { e.preventDefault(); undoMove(); }
     else if (e.key === 'Delete' || e.key === '0' || e.key === 'c' || e.key === 'C') erase();
-    else if (e.key === 'x' || e.key === 'X' || e.key === 'n' || e.key === 'N') $('notes').click();
+    else if (e.key === 'h' || e.key === 'H') giveHint();
     else if (e.key === 'f' || e.key === 'F') fillNotes();
     else if (e.key === 'Escape') { sel = -1; multi = new Set(); render(); }
     else if (e.key.startsWith('Arrow')) {
