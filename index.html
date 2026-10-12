@@ -37,6 +37,10 @@ body{background:var(--bg);color:var(--ink);font-family:Georgia,"Iowan Old Style"
 .cgblock{margin-bottom:12px}
 .cgblock:last-child{margin-bottom:0}
 .bw{position:relative}
+.mods{display:flex;align-items:center;gap:6px;margin:0 0 10px;flex-wrap:wrap}
+.mods .dl{color:var(--muted);font-size:.85rem;margin-right:2px}
+.mods button{flex:1;min-width:0;padding:6px 8px;font-size:.9rem}
+.mods button[aria-pressed=true]{background:var(--user);color:var(--panel);border-color:var(--user)}
 .digits{display:flex;align-items:center;gap:4px;margin-top:10px}
 .digits .dl{color:var(--muted);font-size:.85rem;margin-right:4px}
 .digits button{flex:1;min-width:0;padding:6px 0;font-size:.95rem}
@@ -115,13 +119,6 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     <option value="sage">Sage</option><option value="rose">Rose</option><option value="midnight">Midnight</option>
   </select><span id="timer" aria-label="Elapsed time">0:00</span></header>
   <div class="bar">
-    <select id="variant" aria-label="Variant">
-      <option value="classic">Classic</option>
-      <option value="knight">Knight</option>
-      <option value="king">King</option>
-      <option value="killer">Killer</option>
-      <option value="kropki">Kropki</option>
-    </select>
     <select id="diff" aria-label="Difficulty">
       <option value="1">Easy</option>
       <option value="2" selected>Medium</option>
@@ -132,6 +129,13 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     </select>
     <button id="new">New game</button>
     <button id="check">Check</button>
+  </div>
+  <div class="mods" id="mods" role="group" aria-label="Variants">
+    <span class="dl">Variants</span>
+    <button data-m="knight" aria-pressed="false">Knight</button>
+    <button data-m="king" aria-pressed="false">King</button>
+    <button data-m="killer" aria-pressed="false">Killer</button>
+    <button data-m="kropki" aria-pressed="false">Kropki</button>
   </div>
   <p id="rule" class="meta" hidden></p>
 </div>
@@ -183,9 +187,13 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   const box = i => Math.floor(row(i) / 3) * 3 + Math.floor(col(i) / 3);
   // Variants. Knight: a chess knight's move apart can't share a digit. King: touching cells
   // (diagonals included) can't share one. Killer: cages must add up to their sum, no repeats inside.
+  // A game can combine variants: `mode` is 'classic' or a '+' joined list such as 'knight+king' or 'killer+kropki'.
   let mode = 'classic', cages = null, cageOf = null, dots = null, budget = Infinity;
+  const ORDER = ['knight', 'king', 'killer', 'kropki'];
+  const parts = m => m === 'classic' ? [] : m.split('+');
+  const has = k => parts(mode).includes(k);
   const buildPeers = (m, cg) => {
-    const own = Array(81).fill(-1);
+    const own = Array(81).fill(-1), ms = parts(m);
     if (cg) cg.forEach((c, k) => c.cells.forEach(i => own[i] = k));
     return Array.from({ length: 81 }, (_, i) => {
       const out = [];
@@ -193,7 +201,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
         if (j === i) continue;
         const dr = Math.abs(row(j) - row(i)), dc = Math.abs(col(j) - col(i));
         if (row(j) === row(i) || col(j) === col(i) || box(j) === box(i) ||
-            (m === 'knight' && dr * dc === 2) || (m === 'king' && dr <= 1 && dc <= 1) ||
+            (ms.includes('knight') && dr * dc === 2) || (ms.includes('king') && dr <= 1 && dc <= 1) ||
             (own[i] >= 0 && own[j] === own[i])) out.push(j);
       }
       return out;
@@ -201,28 +209,28 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   };
   let PEERS = buildPeers('classic', null);
   const RULES = {
-    classic: '',
     knight: "Knight: cells a chess knight's move apart can't hold the same digit.",
     king: "King: cells that touch, even diagonally, can't hold the same digit.",
     killer: 'Killer: each cage adds up to its small number, with no repeats inside it.',
     kropki: 'Kropki: white dot = consecutive digits, black dot = one is double the other. No dot = neither.'
   };
-  const TITLES = { classic: 'Sudoku', knight: 'Knight Sudoku', king: 'King Sudoku', killer: 'Killer Sudoku', kropki: 'Kropki Sudoku' };
+  const TITLES = { knight: 'Knight Sudoku', king: 'King Sudoku', killer: 'Killer Sudoku', kropki: 'Kropki Sudoku' };
   // The 6th level (Insane) only exists where the number of givens can drop to about zero.
   const syncLevels = m => {
-    const hard = m === 'killer' || m === 'kropki';
+    const hard = parts(m).some(k => k === 'killer' || k === 'kropki');
     const opt6 = [...$('diff').options].find(o => o.value === '6');
     opt6.hidden = opt6.disabled = !hard;
     if (!hard && $('diff').value === '6') $('diff').value = '5';
   };
+  const selectedKey = () => ORDER.filter(k => $('mods').querySelector('[data-m="' + k + '"]').getAttribute('aria-pressed') === 'true').join('+') || 'classic';
   const setMode = m => {
     mode = m; cages = null; cageOf = null; dots = null; PEERS = buildPeers(m, null);
-    const rule = RULES[m];
+    const ps = parts(m), rule = ps.map(k => RULES[k]).join(' ');
     $('rule').textContent = rule; $('rule').hidden = !rule;
     syncLevels(m);
-    $('variant').value = m;
-    $('title').textContent = TITLES[m];
-    $('board').classList.toggle('k', m === 'killer');
+    document.querySelectorAll('#mods button').forEach(b => b.setAttribute('aria-pressed', ps.includes(b.dataset.m)));
+    $('title').textContent = ps.length === 0 ? 'Sudoku' : ps.length === 1 ? TITLES[ps[0]] : 'Mixed Sudoku';
+    $('board').classList.toggle('k', has('killer'));
   };
   // All sets of `size` different digits that add up to `sum`.
   const combos = (sum, size) => {
@@ -384,8 +392,8 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
       rec();
       for (let i = 0; i < 81; i++) full[i] = g[i];
     })();
-    if (mode === 'killer') applyCages(makeCages(full, T));
-    if (mode === 'kropki') applyDots(makeDots(full));
+    if (has('killer')) applyCages(makeCages(full, T));
+    if (has('kropki')) applyDots(makeDots(full));
     const puzzle = full.slice();
     let left = 81;
     for (const i of shuffle([...Array(81).keys()])) {
@@ -524,20 +532,26 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   }
 
   // Keeps generating until a puzzle matches the requested level (or time runs out, then closest).
-  const CLUES = {
+  const FLOORS = {
     classic: { 1: 44, 2: 36, 3: 30, 4: 26, 5: 22 },
     knight:  { 1: 42, 2: 34, 3: 26, 4: 22, 5: 18 },
     king:    { 1: 42, 2: 34, 3: 26, 4: 22, 5: 18 },
+    both:    { 1: 32, 2: 22, 3: 18, 4: 15, 5: 11 },      // knight + king
     killer:  { 1: 30, 2: 20, 3: 12, 4: 6, 5: 3, 6: 0 },
     kropki:  { 1: 30, 2: 18, 3: 10, 4: 4, 5: 2, 6: 0 }
   };
+  function floorFor(T) {
+    const t = has('kropki') ? FLOORS.kropki : has('killer') ? FLOORS.killer
+      : has('knight') && has('king') ? FLOORS.both : has('knight') ? FLOORS.knight : has('king') ? FLOORS.king : FLOORS.classic;
+    return t[T] ?? t[5];
+  }
   // Killer / Kropki have no technique rating: the fewer givens, the harder.
-  const levelByClues = n => n >= 26 ? 1 : n >= 16 ? 2 : n >= 9 ? 3 : n >= (mode === 'killer' ? 6 : 4) ? 4 : n >= (mode === 'killer' ? 3 : 2) ? 5 : 6;
+  const levelByClues = n => n >= 26 ? 1 : n >= 16 ? 2 : n >= 9 ? 3 : n >= (has('killer') ? 6 : 4) ? 4 : n >= (has('killer') ? 3 : 2) ? 5 : 6;
   function generateLevel(T) {
     const t0 = Date.now();
     let best = null;
     do {
-      const r = generate(CLUES[mode][T] ?? CLUES[mode][5], T), lv = mode === 'killer' || mode === 'kropki' ? levelByClues(r.puzzle.filter(Boolean).length) : rate(r.puzzle);
+      const r = generate(floorFor(T), T), lv = has('killer') || has('kropki') ? levelByClues(r.puzzle.filter(Boolean).length) : rate(r.puzzle);
       if (!best || Math.abs(lv - T) < Math.abs(best.lv - T)) best = { ...r, lv };
       if (lv === T) break;
     } while (Date.now() - t0 < 3000);
@@ -626,7 +640,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   }
 
   function updateSide() {
-    const on = mode === 'killer';
+    const on = has('killer');
     $('side').hidden = !on; $('layout').classList.toggle('k', on);
     if (!on) return;
     updateSum();
@@ -789,10 +803,10 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   function newGame() {
     msgEl.textContent = 'Generating…'; msgEl.className = '';
     setTimeout(() => {
-      setMode($('variant').value);
+      setMode(selectedKey());
       const T = +$('diff').value, gen = generateLevel(T), full = gen.full, puzzle = gen.puzzle;
-      if (mode === 'killer') applyCages(gen.cages);
-      if (mode === 'kropki') applyDots(gen.dots);
+      if (has('killer')) applyCages(gen.cages);
+      if (has('kropki')) applyDots(gen.dots);
       sol = full; given = puzzle.map(v => !!v); cur = puzzle.slice();
       notes = Array.from({ length: 81 }, () => new Set());
       sel = -1; multi = new Set(); secs = 0; won = false; undo = []; redo = []; struck = {}; focusDigit = 0;
@@ -823,7 +837,12 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   }
   $('hint').onclick = giveHint;
   $('erase').onclick = erase;
-  $('variant').onchange = () => syncLevels($('variant').value);
+  $('mods').addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    b.setAttribute('aria-pressed', b.getAttribute('aria-pressed') !== 'true');
+    syncLevels(selectedKey());
+  });
   $('undo').onclick = undoMove;
   $('redo').onclick = redoMove;
   $('fill').onclick = fillNotes;
