@@ -199,27 +199,36 @@ button:disabled{opacity:.4;cursor:default}
       if (fill(0) && dupLines(g).size === 0) return g;
     }
   }
-  // Share of the clues left (cells; in the = / × variant also the signs) per level. 0 = as few as stay unique.
-  const SHARE = { classic: { 1: .55, 2: .45, 3: .38, 4: 0 }, signs: { 1: .36, 2: .28, 3: .2, 4: 0 } };
+  // Share of the clues left per level (0 = as few as stay unique). In the = / × variant digits and signs are
+  // counted separately, so signs stay rare (a few per puzzle) and the digits carry most of the puzzle.
+  const SHARE = { classic: { 1: .55, 2: .45, 3: .38, 4: 0 },
+    signs: { 1: { c: .5, s: .06 }, 2: { c: .4, s: .05 }, 3: { c: .3, s: .04 }, 4: { c: .2, s: .03 } } };
   function makePuzzle(level) {
     signs = null;
     const sol = makeSolution(), g = sol.slice(), t0 = Date.now();
     const items = [...Array(n * n).keys()].map(i => ['c', i]);
+    const share = SHARE[variant][level];
+    let edges = 0;
     if (variant === 'signs') {
       signs = { h: Array(n * n).fill(0), v: Array(n * n).fill(0) };
       for (let i = 0; i < n * n; i++) {
-        if (i % n < n - 1) { signs.h[i] = sol[i] === sol[i + 1] ? 1 : 2; items.push(['h', i]); }
-        if (i < n * (n - 1)) { signs.v[i] = sol[i] === sol[i + n] ? 1 : 2; items.push(['v', i]); }
+        if (i % n < n - 1) { signs.h[i] = sol[i] === sol[i + 1] ? 1 : 2; items.push(['h', i]); edges++; }
+        if (i < n * (n - 1)) { signs.v[i] = sol[i] === sol[i + n] ? 1 : 2; items.push(['v', i]); edges++; }
       }
     }
-    const target = Math.round(items.length * SHARE[variant][level]);
-    let left = items.length;
+    // how many of each kind to keep at most
+    const left = { c: n * n, s: edges };
+    const target = variant === 'signs'
+      ? { c: Math.round(n * n * share.c), s: Math.round(edges * share.s) }
+      : { c: Math.round(n * n * share), s: 0 };
     for (const [k, i] of shuffle(items)) {
-      if (left <= target || Date.now() - t0 > 3000) break;
+      const t = k === 'c' ? 'c' : 's';
+      if (left[t] <= target[t]) continue;
+      if (Date.now() - t0 > 3000) break;
       const keep = k === 'c' ? g[i] : signs[k][i];
       if (k === 'c') g[i] = -1; else signs[k][i] = 0;
       budget = 20000;
-      if (count(g.slice(), 2) !== 1) { if (k === 'c') g[i] = keep; else signs[k][i] = keep; } else left--;
+      if (count(g.slice(), 2) !== 1) { if (k === 'c') g[i] = keep; else signs[k][i] = keep; } else left[t]--;
     }
     budget = Infinity;
     return { sol, g, signs };
