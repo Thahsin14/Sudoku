@@ -20,6 +20,8 @@ body{background:var(--bg);color:var(--ink);font-family:Georgia,"Iowan Old Style"
 #stage{grid-area:board;min-width:0}
 #controls{grid-area:left;min-width:0}
 #theme{padding:4px 8px;font-size:.85rem}
+.nav{color:var(--user);text-decoration:none;font-size:.9rem}
+.nav:hover{text-decoration:underline}
 #side{grid-area:side;display:flex;flex-direction:column;gap:14px;margin-top:16px;min-width:0}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
 .panel h2{margin:0 0 10px;font-size:1.05rem;display:flex;align-items:center;justify-content:space-between;gap:8px}
@@ -35,6 +37,11 @@ body{background:var(--bg);color:var(--ink);font-family:Georgia,"Iowan Old Style"
 .cgblock{margin-bottom:12px}
 .cgblock:last-child{margin-bottom:0}
 .bw{position:relative}
+.digits{display:flex;align-items:center;gap:4px;margin-top:10px}
+.digits .dl{color:var(--muted);font-size:.85rem;margin-right:4px}
+.digits button{flex:1;min-width:0;padding:6px 0;font-size:.95rem}
+.digits button.on{background:var(--user);color:var(--panel);border-color:var(--user)}
+.digits button.done{opacity:.35}
 #dots{position:absolute;inset:3px;pointer-events:none}
 .dot{position:absolute;width:clamp(11px,3.2vw,16px);aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;background:#fff;border:2px solid #2b2b2b}
 .dot.b{background:#111;border-color:#9aa5b1}
@@ -103,7 +110,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
 <body>
 <div id="layout">
 <div id="head">
-  <header><h1 id="title">Sudoku</h1><select id="theme" aria-label="Palette">
+  <header><h1 id="title">Sudoku</h1><a class="nav" href="takuzu.html">Takuzu &rarr;</a><select id="theme" aria-label="Palette">
     <option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option>
     <option value="sage">Sage</option><option value="rose">Rose</option><option value="midnight">Midnight</option>
   </select><span id="timer" aria-label="Elapsed time">0:00</span></header>
@@ -130,6 +137,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
 </div>
 <main id="stage">
   <div class="bw"><div id="board" role="grid" aria-label="Sudoku board"></div><div id="dots" aria-hidden="true"></div></div>
+  <div class="digits" id="digitBar" aria-label="Highlight a digit"></div>
   <div class="tools" id="undoBar">
     <button id="undo" title="Undo (Backspace or Ctrl+Z)">Undo</button>
     <button id="redo" title="Redo (Ctrl+Y)">Redo</button>
@@ -167,7 +175,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
 (() => {
   const $ = id => document.getElementById(id);
   const boardEl = $('board'), msgEl = $('msg'), timerEl = $('timer');
-  let sol, given, cur, notes, undo = [], redo = [], struck = {}, sel = -1, multi = new Set(), dragging = false, secs = 0, tick = null, won = false;
+  let sol, given, cur, notes, undo = [], redo = [], struck = {}, focusDigit = 0, sel = -1, multi = new Set(), dragging = false, secs = 0, tick = null, won = false;
 
   const rnd = n => Math.floor(Math.random() * n);
   const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = rnd(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
@@ -552,6 +560,14 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
       b.addEventListener('click', () => enter(v));
       pad.appendChild(b);
     }
+    const bar = $('digitBar');
+    bar.innerHTML = '<span class="dl">Show</span>';
+    for (let v = 1; v <= 9; v++) {
+      const b = document.createElement('button');
+      b.textContent = v; b.dataset.v = v; b.title = 'Highlight digit ' + v + ' (Shift+' + v + ')';
+      b.addEventListener('click', () => { focusDigit = focusDigit === v ? 0 : v; render(); });
+      bar.appendChild(b);
+    }
   }
 
   function conflicts() {
@@ -571,20 +587,22 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     const bad = conflicts();
     const single = multi.size === 1;
     const sv = single ? cur[sel] : 0;
+    const hd = focusDigit || sv;   // digit to light up: the chosen one, else the selected cell's
     const counts = Array(10).fill(0);
     cur.forEach(v => counts[v]++);
     [...boardEl.children].forEach((el, i) => {
       el.className = 'c' + (given[i] ? ' g' : '');
       if (multi.has(i)) el.classList.add('sel');
-      else if (single && sv && cur[i] === sv) el.classList.add('s2');
+      else if (hd && (cur[i] === hd || notes[i].has(hd))) el.classList.add('s2');
       else if (single && PEERS[sel].includes(i)) el.classList.add('r');
       if (bad.has(i) && !given[i]) el.classList.add('bad');
       el.innerHTML = (cur[i] ? cur[i] : notes[i].size
-        ? '<div class="notes' + (isLabel(i) ? ' lab' : '') + '">' + [1,2,3,4,5,6,7,8,9].map(v => '<span' + (v === sv && notes[i].has(v) ? ' class="hl"' : '') + '>' + (notes[i].has(v) ? v : '') + '</span>').join('') + '</div>'
+        ? '<div class="notes' + (isLabel(i) ? ' lab' : '') + '">' + [1,2,3,4,5,6,7,8,9].map(v => '<span' + (v === hd && notes[i].has(v) ? ' class="hl"' : '') + '>' + (notes[i].has(v) ? v : '') + '</span>').join('') + '</div>'
         : '') + cageHtml(i);
       el.setAttribute('aria-label', 'Row ' + (row(i) + 1) + ' column ' + (col(i) + 1) + ', ' + (cur[i] || 'empty'));
     });
     [...$('pad').children].forEach(b => b.classList.toggle('done', counts[b.dataset.v] >= 9));
+    [...$('digitBar').querySelectorAll('button')].forEach(b => { b.classList.toggle('on', +b.dataset.v === focusDigit); b.classList.toggle('done', counts[b.dataset.v] >= 9); });
     $('undo').disabled = !undo.length; $('redo').disabled = !redo.length;
     updateSide(); updateDots();
     save();
@@ -686,6 +704,21 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   function undoMove() { if (won || !undo.length) return; redo.push(snapshot()); restore(undo.pop()); render(); }
   function redoMove() { if (won || !redo.length) return; undo.push(snapshot()); restore(redo.pop()); render(); }
 
+  // When a cell becomes a value, drop that digit from the notes of the cells it sees. A neighbour left with a
+  // single note becomes a value itself, so the clean-up carries on from it. Cells that already hold a value are left alone.
+  function prune(start) {
+    derive();
+    const q = [...start];
+    while (q.length) {
+      const i = q.pop(), v = cur[i];
+      if (!v) continue;
+      for (const j of PEERS[i]) {
+        if (given[j] || notes[j].size < 2 || !notes[j].delete(v)) continue;
+        if (notes[j].size === 1) { cur[j] = [...notes[j]][0]; q.push(j); }
+      }
+    }
+  }
+
   // Digits always go into the cell's notes (toggled). With several cells selected, the digit is added to
   // all of them, or removed from all if they already have it.
   function enter(v) {
@@ -695,6 +728,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     const before = snapshot();
     const all = t.every(i => notes[i].has(v));
     t.forEach(i => all ? notes[i].delete(v) : notes[i].add(v));
+    derive(); prune(t.filter(i => cur[i] && cur[i] !== before.cur[i]));
     commit(before); render(); checkWin();
   }
 
@@ -710,12 +744,14 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   // Applies to every empty cell on the board.
   function fillNotes() {
     if (won) return;
+    // Cells with only one candidate are skipped: a single note counts as a value, so filling them would solve the puzzle.
     const empty = [...Array(81).keys()].filter(i => !given[i] && !cur[i]);
+    const fill = empty.filter(i => candidates(cur, i).length >= 2);
     const before = snapshot();
-    empty.forEach(i => { notes[i] = new Set(candidates(cur, i)); });
+    fill.forEach(i => { notes[i] = new Set(candidates(cur, i)); });
     commit(before);
     msgEl.className = '';
-    msgEl.textContent = empty.length ? 'Filled notes in ' + empty.length + (empty.length === 1 ? ' cell.' : ' cells.') : 'No empty cells left.';
+    msgEl.textContent = fill.length ? 'Filled notes in ' + fill.length + (fill.length === 1 ? ' cell.' : ' cells.') : empty.length ? 'Nothing to fill.' : 'No empty cells left.';
     render();
   }
 
@@ -761,7 +797,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
       if (mode === 'kropki') applyDots(gen.dots);
       sol = full; given = puzzle.map(v => !!v); cur = puzzle.slice();
       notes = Array.from({ length: 81 }, () => new Set());
-      sel = -1; multi = new Set(); secs = 0; won = false; undo = []; redo = []; struck = {};
+      sel = -1; multi = new Set(); secs = 0; won = false; undo = []; redo = []; struck = {}; focusDigit = 0;
       msgEl.textContent = gen.lv === T ? '' : 'Closest match found: ' + NAMES[gen.lv - 1] + '.';
       render(); startTimer();
     }, 20);
@@ -782,7 +818,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     const empty = open.filter(i => !cur[i]), pool = empty.length ? empty : open;
     if (!pool.length) return;
     const i = pool[rnd(pool.length)], before = snapshot();
-    place(i, sol[i]);
+    place(i, sol[i]); prune([i]);
     sel = i; multi = new Set([i]);
     msgEl.className = ''; msgEl.textContent = 'Hint: row ' + (row(i) + 1) + ', column ' + (col(i) + 1) + '.';
     commit(before); render(); checkWin();
@@ -801,12 +837,13 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
       if (k === 'y') { e.preventDefault(); redoMove(); return; }
     }
     if (/^(SELECT|INPUT|TEXTAREA)$/.test(e.target.tagName) || e.ctrlKey || e.metaKey || e.altKey) return;
-    if (/^[1-9]$/.test(e.key)) enter(+e.key);
+    if (e.shiftKey && /^Digit[1-9]$/.test(e.code)) { const d = +e.code.slice(5); focusDigit = focusDigit === d ? 0 : d; render(); }
+    else if (/^[1-9]$/.test(e.key)) enter(+e.key);
     else if (e.key === 'Backspace') { e.preventDefault(); undoMove(); }
     else if (e.key === 'Delete' || e.key === '0' || e.key === 'c' || e.key === 'C') erase();
     else if (e.key === 'h' || e.key === 'H') giveHint();
     else if (e.key === 'f' || e.key === 'F') fillNotes();
-    else if (e.key === 'Escape') { sel = -1; multi = new Set(); render(); }
+    else if (e.key === 'Escape') { sel = -1; multi = new Set(); focusDigit = 0; render(); }
     else if (e.key.startsWith('Arrow')) {
       e.preventDefault();
       if (sel < 0) sel = 0;
