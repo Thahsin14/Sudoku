@@ -740,18 +740,16 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     commit(before); render();
   }
 
-  // Fills notes with the digits that don't clash with the row, column or box.
-  // Applies to every empty cell on the board.
+  // Puts every digit 1-9 into the notes of each empty cell, with no validity check.
+  // Cells that already have a value or notes are left alone, so your own eliminations survive.
   function fillNotes() {
     if (won) return;
-    // Cells with only one candidate are skipped: a single note counts as a value, so filling them would solve the puzzle.
-    const empty = [...Array(81).keys()].filter(i => !given[i] && !cur[i]);
-    const fill = empty.filter(i => candidates(cur, i).length >= 2);
+    const fill = [...Array(81).keys()].filter(i => !given[i] && !cur[i] && !notes[i].size);
     const before = snapshot();
-    fill.forEach(i => { notes[i] = new Set(candidates(cur, i)); });
+    fill.forEach(i => { notes[i] = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9]); });
     commit(before);
     msgEl.className = '';
-    msgEl.textContent = fill.length ? 'Filled notes in ' + fill.length + (fill.length === 1 ? ' cell.' : ' cells.') : empty.length ? 'Nothing to fill.' : 'No empty cells left.';
+    msgEl.textContent = fill.length ? 'Filled ' + fill.length + (fill.length === 1 ? ' cell' : ' cells') + ' with 1-9.' : 'No empty cells to fill.';
     render();
   }
 
