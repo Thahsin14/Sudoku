@@ -42,6 +42,9 @@ button:disabled{opacity:.4;cursor:default}
 .c.g{color:var(--given);font-weight:700}
 .c.r{box-shadow:inset 0 0 0 100px color-mix(in srgb,var(--user) 8%,transparent)}
 .c.sel{box-shadow:inset 0 0 0 3px var(--user)}
+.c.hs{background:rgba(224,161,0,.3)}
+.c.ht{box-shadow:inset 0 0 0 3px #e0a100}
+#msg.hint{color:var(--ink)}
 .c.bad{color:var(--bad);background:var(--badbg)}
 #msg{min-height:1.5em;margin:12px 0 0;text-align:center;color:var(--muted)}
 #msg.win{color:var(--user);font-weight:700}
@@ -78,7 +81,7 @@ button:disabled{opacity:.4;cursor:default}
   <div class="tools" style="margin-top:12px">
     <button id="undo" title="Undo (Backspace or Ctrl+Z)">Undo</button>
     <button id="redo" title="Redo (Ctrl+Y)">Redo</button>
-    <button id="hint" title="Hint (H)">Hint</button>
+    <button id="hint" title="Hint (H); press again to place it">Hint</button>
   </div>
   <p id="msg" role="status"></p>
 </main>
@@ -86,7 +89,7 @@ button:disabled{opacity:.4;cursor:default}
 (() => {
   const $ = id => document.getElementById(id);
   const boardEl = $('board'), msgEl = $('msg'), timerEl = $('timer');
-  let n = 8, variant = 'classic', signs = null, sol, given, cur, undo = [], redo = [], sel = -1, secs = 0, tick = null, won = false;
+  let n = 8, variant = 'classic', signs = null, hintState = null, sol, given, cur, undo = [], redo = [], sel = -1, secs = 0, tick = null, won = false;
   const rnd = k => Math.floor(Math.random() * k);
   const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = rnd(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 
@@ -253,6 +256,7 @@ button:disabled{opacity:.4;cursor:default}
       el.className = 'c' + (cur[i] >= 0 ? ' v' + cur[i] : '') + (given[i] ? ' g' : '') + (bad.has(i) && !given[i] ? ' bad' : '');
       if (sel >= 0 && i !== sel && (r === Math.floor(sel / n) || c === sel % n)) el.classList.add('r');
       if (i === sel) el.classList.add('sel');
+      if (hintState) { if (hintState.src.has(i)) el.classList.add('hs'); if (hintState.cell === i) el.classList.add('ht'); }
       el.textContent = cur[i] >= 0 ? cur[i] : '';
       el.setAttribute('aria-label', 'Row ' + (r + 1) + ' column ' + (c + 1) + ', ' + (cur[i] >= 0 ? cur[i] : 'empty'));
     });
@@ -269,6 +273,7 @@ button:disabled{opacity:.4;cursor:default}
   }
   function change(i, v) {
     if (won || given[i] || cur[i] === v) return;
+    hintState = null;
     undo.push(cur.slice()); if (undo.length > 500) undo.shift();
     redo = [];
     cur[i] = v; msgEl.textContent = ''; msgEl.className = '';
@@ -282,16 +287,61 @@ button:disabled{opacity:.4;cursor:default}
       localStorage.removeItem('takuzu');
     }
   }
-  function undoMove() { if (won || !undo.length) return; redo.push(cur.slice()); cur = undo.pop(); render(); }
-  function redoMove() { if (won || !redo.length) return; undo.push(cur.slice()); cur = redo.pop(); render(); }
+  function undoMove() { if (won || !undo.length) return; hintState = null; redo.push(cur.slice()); cur = undo.pop(); render(); }
+  function redoMove() { if (won || !redo.length) return; hintState = null; undo.push(cur.slice()); cur = redo.pop(); render(); }
+  // ---- Hints: the next forced move and why ----
+  const cellName = i => 'row ' + (Math.floor(i / n) + 1) + ', column ' + (i % n + 1);
+  // Why can't digit w go in cell i? Returns { rank, text, cells } (lower rank = simpler rule) or null if it can.
+  function whyNot(g, i, w) {
+    const r = Math.floor(i / n), c = i % n, h = n / 2;
+    const at = (rr, cc) => rr < 0 || cc < 0 || rr >= n || cc >= n ? -2 : g[rr * n + cc];
+    for (const [dr, dc, name] of [[0, 1, 'row'], [1, 0, 'column']]) {
+      const cell = k => (r + k * dr) * n + (c + k * dc);
+      const a = at(r - 2 * dr, c - 2 * dc), b = at(r - dr, c - dc), d = at(r + dr, c + dc), e = at(r + 2 * dr, c + 2 * dc);
+      if (a === w && b === w) return { rank: 1, cells: [cell(-2), cell(-1)], text: 'two ' + w + 's are already side by side next to it in the ' + name + ' (highlighted), and three in a row are not allowed' };
+      if (d === w && e === w) return { rank: 1, cells: [cell(1), cell(2)], text: 'two ' + w + 's are already side by side next to it in the ' + name + ' (highlighted), and three in a row are not allowed' };
+      if (b === w && d === w) return { rank: 1, cells: [cell(-1), cell(1)], text: 'it sits between two ' + w + 's in the ' + name + ' (highlighted), which would make three in a row' };
+    }
+    const rc = [], cc = [];
+    for (let k = 0; k < n; k++) { if (k !== c && g[r * n + k] === w) rc.push(r * n + k); if (k !== r && g[k * n + c] === w) cc.push(k * n + c); }
+    if (rc.length >= h) return { rank: 2, cells: rc, text: 'row ' + (r + 1) + ' already has ' + h + ' ' + w + 's (highlighted), which is half of the row' };
+    if (cc.length >= h) return { rank: 2, cells: cc, text: 'column ' + (c + 1) + ' already has ' + h + ' ' + w + 's (highlighted), which is half of the column' };
+    if (signs) for (const j of [r > 0 && i - n, r < n - 1 && i + n, c > 0 && i - 1, c < n - 1 && i + 1]) {
+      if (j === false || g[j] < 0) continue;
+      const sg = edge(i, j);
+      if (sg === 1 && g[j] !== w) return { rank: 3, cells: [j], text: 'a = sign links it to its neighbour (highlighted), which is a ' + g[j] + ', so the two must match' };
+      if (sg === 2 && g[j] === w) return { rank: 3, cells: [j], text: 'a \u00d7 sign says it differs from its neighbour (highlighted), which is a ' + w };
+    }
+    return null;
+  }
+  function findHint() {
+    const bad = cur.findIndex((v, i) => !given[i] && v >= 0 && v !== sol[i]);
+    if (bad >= 0) return { cell: bad, digit: -1, src: new Set(), ask: 'Press H again to clear it.',
+      text: 'Mistake: ' + cellName(bad) + ' holds a ' + cur[bad] + ' that does not belong there. Remove it before going on.' };
+    let best = null;
+    for (let i = 0; i < n * n; i++) {
+      if (cur[i] >= 0) continue;
+      for (const v of [0, 1]) {
+        const w = whyNot(cur, i, 1 - v);
+        if (w && !whyNot(cur, i, v) && (!best || w.rank < best.w.rank)) best = { i, v, w };
+      }
+    }
+    if (best) return { cell: best.i, digit: best.v, src: new Set(best.w.cells), ask: 'Press H again to place it.',
+      text: cellName(best.i) + ' must be a ' + best.v + '. A ' + (1 - best.v) + ' cannot go there: ' + best.w.text + '.' };
+    const open = [...Array(n * n).keys()].filter(i => cur[i] < 0);
+    if (!open.length) return null;
+    const i = open[rnd(open.length)];
+    return { cell: i, digit: sol[i], src: new Set(), ask: 'Press H again to place it.',
+      text: 'No simple rule applies here (it needs the rule that no two rows or columns are identical, or a trial). From the solution: ' + cellName(i) + ' is a ' + sol[i] + '.' };
+  }
   function hint() {
     if (won) return;
-    const open = [...Array(n * n).keys()].filter(i => !given[i] && cur[i] !== sol[i]);
-    const empty = open.filter(i => cur[i] < 0), pool = empty.length ? empty : open;
-    if (!pool.length) return;
-    const i = pool[rnd(pool.length)];
-    sel = i; change(i, sol[i]);
-    if (!won) msgEl.textContent = 'Hint: row ' + (Math.floor(i / n) + 1) + ', column ' + (i % n + 1) + '.';
+    if (hintState) { const h = hintState; hintState = null; msgEl.className = ''; msgEl.textContent = ''; change(h.cell, h.digit); return; }
+    const h = findHint();
+    if (!h) return;
+    hintState = h; sel = h.cell;
+    msgEl.className = 'hint'; msgEl.textContent = h.text + ' ' + h.ask;
+    render();
   }
   const fmt = s => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
   function startTimer() {
@@ -308,7 +358,7 @@ button:disabled{opacity:.4;cursor:default}
       n = +$('size').value; variant = $('variant').value;
       const { sol: s, g } = makePuzzle(+$('level').value);
       sol = s; cur = g.slice(); given = g.map(v => v >= 0);
-      undo = []; redo = []; sel = -1; secs = 0; won = false;
+      undo = []; redo = []; sel = -1; secs = 0; won = false; hintState = null;
       build(); msgEl.textContent = ''; render(); startTimer();
     }, 20);
   }
