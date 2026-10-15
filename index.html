@@ -74,6 +74,9 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
 .c.r{background:var(--rel)}
 .c.s2{background:var(--same)}
 .c.sel{background:var(--sel);box-shadow:inset 0 0 0 2px var(--user)}
+.c.hs{background:rgba(224,161,0,.3)}
+.c.ht{box-shadow:inset 0 0 0 3px #e0a100}
+#msg.hint{color:var(--ink)}
 .c.bad{color:var(--bad);background:var(--badbg)}
 .notes{pointer-events:none;position:absolute;inset:0;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);font-size:clamp(.5rem,2.4vw,.75rem);color:var(--muted);line-height:1;padding:2px}
 .notes span{display:flex;align-items:center;justify-content:center;border-radius:3px}
@@ -153,7 +156,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   <div class="tools">
     <button id="erase" title="Clear cells (C)">Erase</button>
     <button id="fill" title="Fill notes (F)">Fill notes</button>
-    <button id="hint" title="Hint (H)">Hint</button>
+    <button id="hint" title="Hint (H); press again to place it">Hint</button>
   </div>
 </section>
 <aside id="side" hidden>
@@ -179,7 +182,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
 (() => {
   const $ = id => document.getElementById(id);
   const boardEl = $('board'), msgEl = $('msg'), timerEl = $('timer');
-  let sol, given, cur, notes, undo = [], redo = [], struck = {}, focusDigit = 0, sel = -1, multi = new Set(), dragging = false, secs = 0, tick = null, won = false;
+  let sol, given, cur, notes, undo = [], redo = [], struck = {}, focusDigit = 0, hintState = null, sel = -1, multi = new Set(), dragging = false, secs = 0, tick = null, won = false;
 
   const rnd = n => Math.floor(Math.random() * n);
   const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = rnd(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
@@ -610,6 +613,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
       else if (hd && (cur[i] === hd || notes[i].has(hd))) el.classList.add('s2');
       else if (single && PEERS[sel].includes(i)) el.classList.add('r');
       if (bad.has(i) && !given[i]) el.classList.add('bad');
+      if (hintState) { if (hintState.src.has(i)) el.classList.add('hs'); if (hintState.cell === i) el.classList.add('ht'); }
       el.innerHTML = (cur[i] ? cur[i] : notes[i].size
         ? '<div class="notes' + (isLabel(i) ? ' lab' : '') + '">' + [1,2,3,4,5,6,7,8,9].map(v => '<span' + (v === hd && notes[i].has(v) ? ' class="hl"' : '') + '>' + (notes[i].has(v) ? v : '') + '</span>').join('') + '</div>'
         : '') + cageHtml(i);
@@ -711,12 +715,13 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   const snapshot = () => { derive(); return { cur: cur.slice(), notes: notes.map(x => [...x]) }; };
   const restore = sn => { cur = sn.cur.slice(); notes = sn.notes.map(a => new Set(a)); };
   function commit(before) {
+    hintState = null;
     if (JSON.stringify(before) === JSON.stringify(snapshot())) return;
     undo.push(before); if (undo.length > 500) undo.shift();
     redo = [];
   }
-  function undoMove() { if (won || !undo.length) return; redo.push(snapshot()); restore(undo.pop()); render(); }
-  function redoMove() { if (won || !redo.length) return; undo.push(snapshot()); restore(redo.pop()); render(); }
+  function undoMove() { if (won || !undo.length) return; hintState = null; redo.push(snapshot()); restore(undo.pop()); render(); }
+  function redoMove() { if (won || !redo.length) return; hintState = null; undo.push(snapshot()); restore(redo.pop()); render(); }
 
   // When a cell becomes a value, drop that digit from the notes of the cells it sees. A neighbour left with a
   // single note becomes a value itself, so the clean-up carries on from it. Cells that already hold a value are left alone.
@@ -809,7 +814,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
       if (has('kropki')) applyDots(gen.dots);
       sol = full; given = puzzle.map(v => !!v); cur = puzzle.slice();
       notes = Array.from({ length: 81 }, () => new Set());
-      sel = -1; multi = new Set(); secs = 0; won = false; undo = []; redo = []; struck = {}; focusDigit = 0;
+      sel = -1; multi = new Set(); secs = 0; won = false; undo = []; redo = []; struck = {}; focusDigit = 0; hintState = null;
       msgEl.textContent = gen.lv === T ? '' : 'Closest match found: ' + NAMES[gen.lv - 1] + '.';
       render(); startTimer();
     }, 20);
@@ -822,17 +827,60 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     msgEl.className = '';
     msgEl.textContent = wrong ? wrong + (wrong === 1 ? ' cell is' : ' cells are') + ' wrong.' : 'No mistakes so far.';
   };
-  // Hint reveals a random unsolved cell (empty ones first), whatever is selected.
+  // ---- Hints: the next move you could really make, with the reason ----
+  const cellName = i => 'row ' + (row(i) + 1) + ', column ' + (col(i) + 1);
+  const BOXN = ['top left', 'top middle', 'top right', 'middle left', 'centre', 'middle right', 'bottom left', 'bottom middle', 'bottom right'];
+  const unitName = (kind, k) => kind === 'row' ? 'row ' + (k + 1) : kind === 'col' ? 'column ' + (k + 1) : 'the ' + BOXN[k] + ' box';
+
+  // Works from the digits on the board only (not your notes): a wrong digit first, then hidden singles
+  // (box, row, column), then naked singles. Without any of those it falls back to a digit from the solution.
+  function findHint() {
+    derive();
+    const bad = [...Array(81).keys()].find(i => !given[i] && cur[i] && cur[i] !== sol[i]);
+    if (bad !== undefined) return { cell: bad, digit: 0, src: new Set(), ask: 'Press H again to clear it.',
+      text: 'Mistake: ' + cellName(bad) + ' holds a ' + cur[bad] + ' that does not belong there. Remove it before going on.' };
+    const cand = [];
+    for (let i = 0; i < 81; i++) if (!cur[i]) cand[i] = candidates(cur, i);
+    const holder = (j, d) => PEERS[j].find(p => cur[p] === d);   // a cell that already rules d out of j
+    for (const [kind, off] of [['box', 2], ['row', 0], ['col', 1]]) for (let k = 0; k < 9; k++) {
+      const u = UNITS[3 * k + off];
+      for (let d = 1; d <= 9; d++) {
+        if (u.some(i => cur[i] === d)) continue;
+        const cs = u.filter(i => !cur[i] && cand[i].includes(d));
+        if (cs.length !== 1) continue;
+        const src = new Set(); let other = false;
+        u.forEach(j => { if (cur[j] || j === cs[0]) return; const p = holder(j, d); if (p === undefined) other = true; else src.add(p); });
+        return { cell: cs[0], digit: d, src, ask: 'Press H again to place it.',
+          text: 'In ' + unitName(kind, k) + ' the ' + d + ' has only one place left: ' + cellName(cs[0]) + '. Every other empty cell there already sees a ' + d + ' (highlighted)' + (other ? ' or is ruled out by the variant rules' : '') + '.' };
+      }
+    }
+    for (let i = 0; i < 81; i++) {
+      if (cur[i] || cand[i].length !== 1) continue;
+      const v = cand[i][0], src = new Set(); let other = false;
+      for (let w = 1; w <= 9; w++) { if (w === v) continue; const p = holder(i, w); if (p === undefined) other = true; else src.add(p); }
+      return { cell: i, digit: v, src, ask: 'Press H again to place it.',
+        text: cellName(i) + ' can only be a ' + v + ': every other digit is already used by a cell it sees (highlighted)' + (other ? ' or is excluded by the variant rules' : '') + '.' };
+    }
+    const open = [...Array(81).keys()].filter(i => !given[i] && !cur[i]);
+    if (!open.length) return null;
+    const i = open[rnd(open.length)];
+    return { cell: i, digit: sol[i], src: new Set(), ask: 'Press H again to place it.',
+      text: 'No simple deduction is left (this needs a more advanced technique or a guess). From the solution: ' + cellName(i) + ' is a ' + sol[i] + '.' };
+  }
   function giveHint() {
     if (won) return;
-    derive();
-    const open = [...Array(81).keys()].filter(i => !given[i] && cur[i] !== sol[i]);
-    const empty = open.filter(i => !cur[i]), pool = empty.length ? empty : open;
-    if (!pool.length) return;
-    const i = pool[rnd(pool.length)], before = snapshot();
-    place(i, sol[i]); prune([i]);
-    sel = i; multi = new Set([i]);
-    msgEl.className = ''; msgEl.textContent = 'Hint: row ' + (row(i) + 1) + ', column ' + (col(i) + 1) + '.';
+    if (hintState) { applyHint(); return; }          // second press carries the hint out
+    const h = findHint();
+    if (!h) return;
+    hintState = h; sel = h.cell; multi = new Set([h.cell]);
+    msgEl.className = 'hint'; msgEl.textContent = h.text + ' ' + h.ask;
+    render();
+  }
+  function applyHint() {
+    const h = hintState; hintState = null;
+    const before = snapshot();
+    if (h.digit) { place(h.cell, h.digit); prune([h.cell]); } else notes[h.cell].clear();
+    msgEl.className = ''; msgEl.textContent = '';
     commit(before); render(); checkWin();
   }
   $('hint').onclick = giveHint;
