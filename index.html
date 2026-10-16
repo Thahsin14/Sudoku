@@ -79,6 +79,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
 .c.r{background:var(--rel)}
 .c.s2{background:var(--same)}
 .c.sel{background:var(--sel);box-shadow:inset 0 0 0 2px var(--user)}
+.c.cm{background:rgba(150,110,220,.24)}
 .c.hs{background:rgba(224,161,0,.3)}
 .c.ht{box-shadow:inset 0 0 0 3px #e0a100}
 #msg.hint{color:var(--ink)}
@@ -90,6 +91,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
 .cg{position:absolute;inset:2px;pointer-events:none;border:1px dashed transparent}
 .cg.t{border-top-color:var(--cage)}.cg.b{border-bottom-color:var(--cage)}.cg.l{border-left-color:var(--cage)}.cg.r{border-right-color:var(--cage)}
 .sum{position:absolute;top:2px;left:3px;font-size:clamp(.58rem,2.4vw,.74rem);line-height:1;font-weight:600;color:var(--muted);pointer-events:none}
+.notes span.rm{background:rgba(150,110,220,.5);color:var(--ink);font-weight:700}
 .notes span.hl{background:var(--user);color:var(--panel);font-weight:700}
 #pad{display:grid;grid-template-columns:repeat(9,1fr);gap:6px;margin-top:14px}
 #pad button{padding:10px 0;font-size:1.3rem}
@@ -773,6 +775,15 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     const single = multi.size === 1;
     const sv = single ? cur[sel] : 0;
     const hd = focusDigit || sv;   // digit to light up: the chosen one, else the selected cell's
+    // several cells selected: the cells that see ALL of them are where their digits can be struck from the notes
+    let common = null; const union = new Set();
+    if (multi.size > 1) {
+      const sel2 = [...multi];
+      common = new Set(PEERS[sel2[0]]);
+      for (const k of sel2.slice(1)) { const ps = new Set(PEERS[k]); for (const x of [...common]) if (!ps.has(x)) common.delete(x); }
+      sel2.forEach(k => { common.delete(k); notes[k].forEach(d => union.add(d)); });
+      for (const x of [...common]) if (cur[x]) common.delete(x);
+    }
     const counts = Array(10).fill(0);
     cur.forEach(v => counts[v]++);
     [...boardEl.children].forEach((el, i) => {
@@ -780,10 +791,11 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
       if (multi.has(i)) el.classList.add('sel');
       else if (hd && (cur[i] === hd || notes[i].has(hd))) el.classList.add('s2');
       else if (single && PEERS[sel].includes(i)) el.classList.add('r');
+      else if (common && common.has(i)) el.classList.add('cm');
       if (bad.has(i) && !given[i]) el.classList.add('bad');
       if (hintState) { if (hintState.src.has(i)) el.classList.add('hs'); if (hintState.cell === i) el.classList.add('ht'); }
       el.innerHTML = (cur[i] ? cur[i] : notes[i].size
-        ? '<div class="notes' + (isLabel(i) ? ' lab' : '') + '">' + [1,2,3,4,5,6,7,8,9].map(v => '<span' + (v === hd && notes[i].has(v) ? ' class="hl"' : '') + '>' + (notes[i].has(v) ? v : '') + '</span>').join('') + '</div>'
+        ? '<div class="notes' + (isLabel(i) ? ' lab' : '') + '">' + [1,2,3,4,5,6,7,8,9].map(v => '<span' + (notes[i].has(v) ? (v === hd ? ' class="hl"' : common && common.has(i) && union.has(v) ? ' class="rm"' : '') : '') + '>' + (notes[i].has(v) ? v : '') + '</span>').join('') + '</div>'
         : '') + cageHtml(i);
       el.setAttribute('aria-label', 'Row ' + (row(i) + 1) + ' column ' + (col(i) + 1) + ', ' + (cur[i] || 'empty'));
     });
