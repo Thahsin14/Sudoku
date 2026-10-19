@@ -42,6 +42,7 @@ body{background:var(--bg);color:var(--ink);font-family:Georgia,"Iowan Old Style"
 .settings label{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:.95rem}
 .settings select{padding:4px 8px;font-size:.9rem}
 .settings input[type=checkbox]{width:1.15rem;height:1.15rem;accent-color:var(--user)}
+.hc{flex:none;align-self:center;color:var(--muted);font-size:.9rem;padding:0 6px;white-space:nowrap}
 .mods{display:flex;align-items:center;gap:6px;margin:0 0 10px;flex-wrap:wrap}
 .mods .dl{color:var(--muted);font-size:.85rem;margin-right:2px}
 .mods button{flex:1;min-width:0;padding:6px 8px;font-size:.9rem}
@@ -91,6 +92,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
 .cg{position:absolute;inset:2px;pointer-events:none;border:1px dashed transparent}
 .cg.t{border-top-color:var(--cage)}.cg.b{border-bottom-color:var(--cage)}.cg.l{border-left-color:var(--cage)}.cg.r{border-right-color:var(--cage)}
 .sum{position:absolute;top:2px;left:3px;font-size:clamp(.58rem,2.4vw,.74rem);line-height:1;font-weight:600;color:var(--muted);pointer-events:none}
+.notes span.hx{background:rgba(220,70,70,.5);color:var(--ink);font-weight:700;text-decoration:line-through}
 .notes span.hl{background:var(--user);color:var(--panel);font-weight:700}
 #pad{display:grid;grid-template-columns:repeat(9,1fr);gap:6px;margin-top:14px}
 #pad button{padding:10px 0;font-size:1.3rem}
@@ -150,6 +152,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     <span class="dl">Variants</span>
     <button data-m="knight" aria-pressed="false">Knight</button>
     <button data-m="king" aria-pressed="false">King</button>
+    <button data-m="nonconsec" aria-pressed="false" title="Non-consecutive">Non-con.</button>
     <button data-m="killer" aria-pressed="false">Killer</button>
     <button data-m="kropki" aria-pressed="false">Kropki</button>
   </div>
@@ -161,6 +164,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   <div class="tools" id="undoBar">
     <button id="undo" title="Undo (Backspace or Ctrl+Z)">Undo</button>
     <button id="redo" title="Redo (Ctrl+Y)">Redo</button>
+    <span id="hintCount" class="hc">Hints: 0</span>
   </div>
   <p id="msg" role="status"></p>
 </main>
@@ -195,7 +199,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
 (() => {
   const $ = id => document.getElementById(id);
   const boardEl = $('board'), msgEl = $('msg'), timerEl = $('timer');
-  let sol, given, cur, notes, undo = [], redo = [], struck = {}, focusDigit = 0, hintState = null, sel = -1, multi = new Set(), dragging = false, secs = 0, tick = null, won = false;
+  let sol, given, cur, notes, undo = [], redo = [], struck = {}, focusDigit = 0, hintState = null, hintCount = 0, sel = -1, multi = new Set(), dragging = false, secs = 0, tick = null, won = false;
 
   const rnd = n => Math.floor(Math.random() * n);
   const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = rnd(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
@@ -204,8 +208,8 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   // Variants. Knight: a chess knight's move apart can't share a digit. King: touching cells
   // (diagonals included) can't share one. Killer: cages must add up to their sum, no repeats inside.
   // A game can combine variants: `mode` is 'classic' or a '+' joined list such as 'knight+king' or 'killer+kropki'.
-  let mode = 'classic', cages = null, cageOf = null, dots = null, dotsNeg = true, budget = Infinity;
-  const ORDER = ['knight', 'king', 'killer', 'kropki'];
+  let mode = 'classic', cages = null, cageOf = null, dots = null, dotsNeg = true, nonConsec = false, budget = Infinity;
+  const ORDER = ['knight', 'king', 'nonconsec', 'killer', 'kropki'];
   const parts = m => m === 'classic' ? [] : m.split('+');
   const has = k => parts(mode).includes(k);
   const buildPeers = (m, cg) => {
@@ -227,12 +231,13 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   const RULES = {
     knight: "Knight: cells a chess knight's move apart can't hold the same digit.",
     king: "King: cells that touch, even diagonally, can't hold the same digit.",
+    nonconsec: "Non-consecutive: cells that share an edge can't hold consecutive digits (no 4 next to a 5).",
     killer: 'Killer: each cage adds up to its small number, with no repeats inside it.',
     kropki: 'Kropki: white dot = consecutive digits, black dot = one is double the other.'
   };
   const ruleText = m => parts(m).map(k => k === 'kropki' ? RULES.kropki + (dotsNeg ? ' No dot = neither.' : ' A missing dot tells you nothing.') : RULES[k]).join(' ');
   const refreshRule = () => { const t = ruleText(mode); $('rule').textContent = t; $('rule').hidden = !t; };
-  const TITLES = { knight: 'Knight Sudoku', king: 'King Sudoku', killer: 'Killer Sudoku', kropki: 'Kropki Sudoku' };
+  const TITLES = { knight: 'Knight Sudoku', king: 'King Sudoku', nonconsec: 'Non-consecutive Sudoku', killer: 'Killer Sudoku', kropki: 'Kropki Sudoku' };
   // Insane and Nightmare are only offered with a variant: that is where the generator can actually reach them.
   const syncLevels = m => {
     const any = parts(m).length > 0;
@@ -243,7 +248,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   const setMode = m => {
     mode = m; cages = null; cageOf = null; dots = null; PEERS = buildPeers(m, null);
     const ps = parts(m);
-    dotsNeg = true; refreshRule();
+    dotsNeg = true; nonConsec = ps.includes('nonconsec'); refreshRule();
     syncLevels(m);
     document.querySelectorAll('#mods button').forEach(b => b.setAttribute('aria-pressed', ps.includes(b.dataset.m)));
     $('title').textContent = ps.length === 0 ? 'Sudoku' : ps.length === 1 ? TITLES[ps[0]] : 'Mixed Sudoku';
@@ -363,6 +368,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     const out = [];
     for (let v = 1; v <= 9; v++) {
       if (used.has(v) || !(allowed & (1 << v))) continue;
+      if (nonConsec && NB[i].some(j => g[j] && Math.abs(g[j] - v) === 1)) continue;
       if (dots && NB[i].some(j => g[j] && !dotOK(v, g[j], edgeT(i, j)))) continue;
       out.push(v);
     }
@@ -395,23 +401,30 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     const t0 = Date.now();
     cages = null; cageOf = null; dots = null; PEERS = buildPeers(mode, null);
     const full = Array(81).fill(0);
-    // randomised fill: solve with shuffled candidate order, keep result
+    // random full grid: depth-first search with the same propagation the rater uses; an unlucky branch is abandoned
     (function fill() {
-      const g = Array(81).fill(0);
-      const rec = () => {
-        let best = -1, bc = null;
-        for (let i = 0; i < 81; i++) {
-          if (g[i]) continue;
-          const c = candidates(g, i);
-          if (!bc || c.length < bc.length) { best = i; bc = c; }
-        }
-        if (best < 0) return true;
-        for (const v of shuffle(bc)) { g[best] = v; if (rec()) return true; }
-        g[best] = 0; return false;
-      };
-      rec();
-      for (let i = 0; i < 81; i++) full[i] = g[i];
+      const listD = m => { const out = []; for (let v = 1; v <= 9; v++) if (m & BIT(v)) out.push(v); return out; };
+      for (;;) {
+        let nodes = 0;
+        const dfs = (g, c) => {
+          if (++nodes > 3000) return null;
+          if (!propagate(g, c)) return null;
+          let best = -1, bn = 10;
+          for (let i = 0; i < 81; i++) if (!g[i]) { const n = bits(c[i]); if (n < bn) { bn = n; best = i; } }
+          if (best < 0) return g;
+          for (const v of shuffle(listD(c[best]))) {
+            const g2 = g.slice(), c2 = c.slice();
+            if (!assign(g2, c2, best, v)) continue;
+            const r = dfs(g2, c2);
+            if (r) return r;
+          }
+          return null;
+        };
+        const r = dfs(Array(81).fill(0), Array(81).fill(0x3fe));
+        if (r) { for (let i = 0; i < 81; i++) full[i] = r[i]; return; }
+      }
     })();
+    const tRemove = Date.now();
     if (has('killer')) applyCages(makeCages(full, T));
     if (has('kropki')) applyDots(makeDots(full), T < 4);   // from level 4 on only dots that exist are shown, so a missing dot means nothing
     const puzzle = full.slice();
@@ -419,7 +432,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     if (has('kropki') && !dotsNeg) for (let i = 0; i < 81; i++) { if (dots.h[i]) items.push(['h', i]); if (dots.v[i]) items.push(['v', i]); }
     let left = 81;
     for (const [k, i] of shuffle(items)) {
-      if (Date.now() - t0 > 1500) break;
+      if (Date.now() - tRemove > 1500) break;
       if (k === 'c' && left <= clues) continue;
       const keep = k === 'c' ? puzzle[i] : dots[k][i];
       if (k === 'c') puzzle[i] = 0; else dots[k][i] = 0;
@@ -462,32 +475,47 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
       if (g[j] === v) return false;
       if (!g[j]) { c[j] &= ~BIT(v); if (!c[j]) return false; }
     }
+    if (nonConsec) for (const j of NB[i]) {
+      if (g[j]) { if (Math.abs(g[j] - v) === 1) return false; }
+      else { c[j] &= ~(BIT(v - 1) | BIT(v + 1)); if (!c[j]) return false; }
+    }
     return true;
+  }
+  // what a cage allows given the digits already in it and the candidates of its empty cells
+  function cageInfo(cg, c, g) {
+    let have = 0, union = 0, sum = 0, empty = 0;
+    for (const i of cg.cells) { if (g[i]) { have |= BIT(g[i]); sum += g[i]; } else { union |= c[i]; empty++; } }
+    if (!empty) return { bad: sum !== cg.sum, allowed: 0, empty, have, union };
+    let allowed = 0;
+    for (const m of cg.masks) if ((m & have) === have && (m & ~have & ~union) === 0) allowed |= m;
+    return { bad: !allowed, allowed, empty, have, union };
+  }
+  // candidates of empty cell i once the dots around it are taken into account
+  function dotMask(i, c, g) {
+    let nc = c[i];
+    for (const j of NB[i]) {
+      const e = edgeT(i, j), cj = g[j] ? BIT(g[j]) : c[j];
+      for (let v = 1; v <= 9; v++) {
+        if (!(nc & BIT(v))) continue;
+        let any = false;
+        for (let w = 1; w <= 9; w++) if (w !== v && (cj & BIT(w)) && dotOK(v, w, e)) { any = true; break; }
+        if (!any) nc &= ~BIT(v);
+      }
+    }
+    return nc;
   }
   // cage and dot reasoning on the candidate masks. -1 = contradiction, 1 = something was struck, 0 = nothing
   function refine(c, g) {
     let changed = 0;
     if (cages) for (const cg of cages) {
-      let have = 0, union = 0, sum = 0, empty = 0;
-      for (const i of cg.cells) { if (g[i]) { have |= BIT(g[i]); sum += g[i]; } else { union |= c[i]; empty++; } }
-      if (!empty) { if (sum !== cg.sum) return -1; continue; }
-      let allowed = 0;
-      for (const m of cg.masks) if ((m & have) === have && (m & ~have & ~union) === 0) allowed |= m;
-      if (!allowed) return -1;
-      for (const i of cg.cells) if (!g[i] && (c[i] & ~allowed)) { c[i] &= allowed; if (!c[i]) return -1; changed = 1; }
+      const r = cageInfo(cg, c, g);
+      if (r.bad) return -1;
+      if (!r.empty) continue;
+      for (const i of cg.cells) if (!g[i] && (c[i] & ~r.allowed)) { c[i] &= r.allowed; if (!c[i]) return -1; changed = 1; }
     }
     if (dots) for (let i = 0; i < 81; i++) {
       if (g[i]) continue;
-      let nc = c[i];
-      for (const j of NB[i]) {
-        const e = edgeT(i, j), cj = g[j] ? BIT(g[j]) : c[j];
-        for (let v = 1; v <= 9; v++) {
-          if (!(nc & BIT(v))) continue;
-          let any = false;
-          for (let w = 1; w <= 9; w++) if (w !== v && (cj & BIT(w)) && dotOK(v, w, e)) { any = true; break; }
-          if (!any) nc &= ~BIT(v);
-        }
-      }
+      const nc = dotMask(i, c, g);
       if (nc !== c[i]) { if (!nc) return -1; c[i] = nc; changed = 1; }
     }
     return changed;
@@ -541,11 +569,11 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
         else cg.cells.forEach(i => { if (!inU.has(i)) outside.add(i); });
       }
       const rest = u.filter(i => !covered.has(i));
-      for (const [cells, target] of [[rest, 45 - inside], [[...outside], total - 45]]) {
+      for (const [cells, target, kind] of [[rest, 45 - inside, 'innie'], [[...outside], total - 45, 'outie']]) {
         const empty = cells.filter(i => !g[i]);
         if (empty.length !== 1) continue;
         const v = target - cells.reduce((a, i) => a + g[i], 0);
-        if (v >= 1 && v <= 9 && (c[empty[0]] & BIT(v))) return [empty[0], v];
+        if (v >= 1 && v <= 9 && (c[empty[0]] & BIT(v))) return [empty[0], v, { u, kind, inside, total }];
       }
     }
     return null;
@@ -555,7 +583,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     const t0 = Date.now();
     const g = start.slice(), c = Array(81).fill(0);
     for (let i = 0; i < 81; i++) if (!g[i]) candidates(g, i).forEach(v => c[i] |= BIT(v));
-    const place = (i, v) => { g[i] = v; c[i] = 0; PEERS[i].forEach(j => { c[j] &= ~BIT(v); }); };
+    const place = (i, v) => { g[i] = v; c[i] = 0; PEERS[i].forEach(j => { c[j] &= ~BIT(v); }); if (nonConsec) NB[i].forEach(j => { c[j] &= ~(BIT(v - 1) | BIT(v + 1)); }); };
     const having = (u, v) => u.filter(i => c[i] & BIT(v));
     const strip = (cells, mask) => { let ch = false; for (const i of cells) if (c[i] & mask) { c[i] &= ~mask; ch = true; } return ch; };
     let level = 1, trials = 0, extra = 0;           // extra: how much non-trivial work the solve took
@@ -659,12 +687,13 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     knight:  { 1: 42, 2: 34, 3: 26, 4: 22, 5: 18, 6: 0, 7: 0 },
     king:    { 1: 42, 2: 34, 3: 26, 4: 22, 5: 18, 6: 0, 7: 0 },
     both:    { 1: 32, 2: 22, 3: 18, 4: 15, 5: 11, 6: 0, 7: 0 },      // knight + king
+    nonconsec: { 1: 38, 2: 22, 3: 20, 4: 15, 5: 12, 6: 0, 7: 0 },
     killer:  { 1: 30, 2: 20, 3: 12, 4: 8, 5: 5, 6: 3, 7: 0 },
     kropki:  { 1: 30, 2: 14, 3: 6, 4: 6, 5: 4, 6: 2, 7: 0 }
   };
   function floorFor(T) {
     const t = has('kropki') ? FLOORS.kropki : has('killer') ? FLOORS.killer
-      : has('knight') && has('king') ? FLOORS.both : has('knight') ? FLOORS.knight : has('king') ? FLOORS.king : FLOORS.classic;
+      : has('nonconsec') ? FLOORS.nonconsec : has('knight') && has('king') ? FLOORS.both : has('king') ? FLOORS.king : has('knight') ? FLOORS.knight : FLOORS.classic;
     return t[T] ?? 0;
   }
   const TIME_LIMIT = { 1: 3000, 2: 3000, 3: 3000, 4: 4000, 5: 7000, 6: 15000, 7: 25000 };
@@ -765,6 +794,8 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     });
     if (dots) for (let i = 0; i < 81; i++) for (const j of NB[i])
       if (j > i && cur[i] && cur[j] && !dotOK(cur[i], cur[j], edgeT(i, j))) { bad.add(i); bad.add(j); }
+    if (nonConsec) for (let i = 0; i < 81; i++) for (const j of NB[i])
+      if (j > i && cur[i] && cur[j] && Math.abs(cur[i] - cur[j]) === 1) { bad.add(i); bad.add(j); }
     return bad;
   }
 
@@ -792,15 +823,16 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
       else if (single && PEERS[sel].includes(i)) el.classList.add('r');
       else if (common && common.has(i)) el.classList.add('cm');
       if (bad.has(i) && !given[i]) el.classList.add('bad');
-      if (hintState) { if (hintState.src.has(i)) el.classList.add('hs'); if (hintState.cell === i) el.classList.add('ht'); }
+      if (hintState) { if (hintState.src.has(i)) el.classList.add('hs'); if (hintState.cell === i || hintState.targets.has(i)) el.classList.add('ht'); }
       el.innerHTML = (cur[i] ? cur[i] : notes[i].size
-        ? '<div class="notes' + (isLabel(i) ? ' lab' : '') + '">' + [1,2,3,4,5,6,7,8,9].map(v => '<span' + (v === hd && notes[i].has(v) ? ' class="hl"' : '') + '>' + (notes[i].has(v) ? v : '') + '</span>').join('') + '</div>'
+        ? '<div class="notes' + (isLabel(i) ? ' lab' : '') + '">' + [1,2,3,4,5,6,7,8,9].map(v => '<span' + (notes[i].has(v) ? (v === hd ? ' class="hl"' : hintState && ((hintState.strike.get(i) || 0) & BIT(v)) ? ' class="hx"' : '') : '') + '>' + (notes[i].has(v) ? v : '') + '</span>').join('') + '</div>'
         : '') + cageHtml(i);
       el.setAttribute('aria-label', 'Row ' + (row(i) + 1) + ' column ' + (col(i) + 1) + ', ' + (cur[i] || 'empty'));
     });
     [...$('pad').children].forEach(b => b.classList.toggle('done', counts[b.dataset.v] >= 9));
     [...$('digitBar').querySelectorAll('button')].forEach(b => { b.classList.toggle('on', +b.dataset.v === focusDigit); b.classList.toggle('done', counts[b.dataset.v] >= 9); });
     $('undo').disabled = !undo.length; $('redo').disabled = !redo.length;
+    $('hintCount').textContent = 'Hints: ' + hintCount;
     updateSide(); updateDots();
     save();
   }
@@ -981,7 +1013,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   function checkWin() {
     if (cur.every((v, i) => v === sol[i])) {
       won = true; clearInterval(tick);
-      msgEl.textContent = 'Solved in ' + fmt(secs) + '.'; msgEl.className = 'win';
+      msgEl.textContent = 'Solved in ' + fmt(secs) + (hintCount ? ' with ' + hintCount + (hintCount === 1 ? ' hint' : ' hints') : ' without hints') + '.'; msgEl.className = 'win';
       localStorage.removeItem('sudoku');
     }
   }
@@ -995,7 +1027,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
   function save() {
     if (won) return;
     try {
-      localStorage.setItem('sudoku', JSON.stringify({ sol, given, cur, notes: notes.map(s => [...s]), secs, diff: $('diff').value, mode, cages, dots, dotsNeg }));
+      localStorage.setItem('sudoku', JSON.stringify({ sol, given, cur, notes: notes.map(s => [...s]), secs, diff: $('diff').value, mode, cages, dots, dotsNeg, hints: hintCount }));
     } catch (e) {}
   }
 
@@ -1003,7 +1035,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     ({ sol, given, cur, secs } = d);
     notes = d.notes.map(a => new Set(a));
     cur.forEach((v, i) => { if (v && !given[i] && !notes[i].size) notes[i].add(v); });
-    undo = []; redo = []; struck = {};
+    undo = []; redo = []; struck = {}; hintCount = d.hints || 0;
     $('diff').value = d.diff;
     if (!$('diff').value) $('diff').value = '2';
     setMode(d.mode || (d.knight ? 'knight' : 'classic'));
@@ -1029,7 +1061,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
       if (has('kropki')) applyDots(gen.dots, gen.dotsNeg);
       sol = gen.full; given = gen.puzzle.map(v => !!v); cur = gen.puzzle.slice();
       notes = Array.from({ length: 81 }, () => new Set());
-      sel = -1; multi = new Set(); secs = 0; won = false; undo = []; redo = []; struck = {}; focusDigit = 0; hintState = null;
+      sel = -1; multi = new Set(); secs = 0; won = false; undo = []; redo = []; struck = {}; focusDigit = 0; hintState = null; hintCount = 0;
       setBusy(false);
       autoFill(settings.autoFill);
       msgEl.className = '';
@@ -1045,59 +1077,287 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
     msgEl.className = '';
     msgEl.textContent = wrong ? wrong + (wrong === 1 ? ' cell is' : ' cells are') + ' wrong.' : 'No mistakes so far.';
   };
-  // ---- Hints: the next move you could really make, with the reason ----
+  // ---- Hints: the next step you could really take, with the reason ----
+  // From simplest to hardest: a wrong digit, singles, innies/outies, cage and dot logic, pairs/triples, locked
+  // candidates, hidden pairs, X-Wing, then "what if" chains (one and two levels deep). Steps that strike candidates
+  // are carried out on your notes. Only when all of that fails does it fall back to the solution.
   const cellName = i => 'row ' + (row(i) + 1) + ', column ' + (col(i) + 1);
+  const rc = i => 'r' + (row(i) + 1) + 'c' + (col(i) + 1);
+  const digs = m => { const a = []; for (let v = 1; v <= 9; v++) if (m & BIT(v)) a.push(v); return a; };
   const BOXN = ['top left', 'top middle', 'top right', 'middle left', 'centre', 'middle right', 'bottom left', 'bottom middle', 'bottom right'];
-  const unitName = (kind, k) => kind === 'row' ? 'row ' + (k + 1) : kind === 'col' ? 'column ' + (k + 1) : 'the ' + BOXN[k] + ' box';
+  const UNAME = t => { const k = Math.floor(t / 3), o = t % 3; return o === 0 ? 'row ' + (k + 1) : o === 1 ? 'column ' + (k + 1) : 'the ' + BOXN[k] + ' box'; };
+  const mk = o => ({ kind: 'place', digit: 0, src: new Set(), targets: new Set(), strike: new Map(), ask: 'Press H again to place it.', ...o });
 
-  // Works from the digits on the board only (not your notes): a wrong digit first, then hidden singles
-  // (box, row, column), then naked singles. Without any of those it falls back to a digit from the solution.
-  function findHint() {
+  // what the hints reason from: the digits on the board, narrowed by your notes where those still hold the right digit
+  function hintBoard() {
     derive();
-    const bad = [...Array(81).keys()].find(i => !given[i] && cur[i] && cur[i] !== sol[i]);
-    if (bad !== undefined) return { cell: bad, digit: 0, src: new Set(), ask: 'Press H again to clear it.',
-      text: 'Mistake: ' + cellName(bad) + ' holds a ' + cur[bad] + ' that does not belong there. Remove it before going on.' };
-    const cand = [];
-    for (let i = 0; i < 81; i++) if (!cur[i]) cand[i] = candidates(cur, i);
-    const holder = (j, d) => PEERS[j].find(p => cur[p] === d);   // a cell that already rules d out of j
+    const g = cur.slice(), c = Array(81).fill(0); let lost = -1;
+    for (let i = 0; i < 81; i++) {
+      if (g[i]) continue;
+      let m = 0; candidates(g, i).forEach(v => { m |= BIT(v); });
+      if (notes[i].size >= 2) {
+        if (!notes[i].has(sol[i])) { if (lost < 0) lost = i; }
+        else { let nm = 0; notes[i].forEach(d => { nm |= BIT(d); }); m &= nm; }
+      }
+      c[i] = m;
+    }
+    return { g, c, lost };
+  }
+  const havingD = (B, u, d) => u.filter(k => !B.g[k] && (B.c[k] & BIT(d)));
+  function elim(B, text, src, strike) {
+    if (!strike.size) return null;
+    return mk({ kind: 'elim', cell: [...strike.keys()][0], src: new Set(src), targets: new Set(strike.keys()), strike, text, base: B.c.slice(),
+      ask: 'Press H again to remove ' + (strike.size === 1 ? 'it' : 'them') + ' from your notes.' });
+  }
+
+  function hiddenSingleHint(B) {
+    const holder = (j, d) => PEERS[j].find(p => B.g[p] === d) ?? (nonConsec ? NB[j].find(p => B.g[p] && Math.abs(B.g[p] - d) === 1) : undefined);
     for (const [kind, off] of [['box', 2], ['row', 0], ['col', 1]]) for (let k = 0; k < 9; k++) {
-      const u = UNITS[3 * k + off];
+      const t = 3 * k + off, u = UNITS[t];
       for (let d = 1; d <= 9; d++) {
-        if (u.some(i => cur[i] === d)) continue;
-        const cs = u.filter(i => !cur[i] && cand[i].includes(d));
+        if (u.some(i => B.g[i] === d)) continue;
+        const cs = havingD(B, u, d);
         if (cs.length !== 1) continue;
         const src = new Set(); let other = false;
-        u.forEach(j => { if (cur[j] || j === cs[0]) return; const p = holder(j, d); if (p === undefined) other = true; else src.add(p); });
-        return { cell: cs[0], digit: d, src, ask: 'Press H again to place it.',
-          text: 'In ' + unitName(kind, k) + ' the ' + d + ' has only one place left: ' + cellName(cs[0]) + '. Every other empty cell there already sees a ' + d + ' (highlighted)' + (other ? ' or is ruled out by the variant rules' : '') + '.' };
+        u.forEach(j => { if (B.g[j] || j === cs[0]) return; const p = holder(j, d); if (p === undefined) other = true; else src.add(p); });
+        return mk({ cell: cs[0], digit: d, src, base: B.c.slice(),
+          text: 'In ' + UNAME(t) + ' the ' + d + ' has only one place left: ' + cellName(cs[0]) + '. Every other empty cell there already sees a ' + d + ' (highlighted)' + (other ? ' or is ruled out by your notes or the variant rules' : '') + '.' });
       }
     }
+    return null;
+  }
+  function nakedSingleHint(B) {
     for (let i = 0; i < 81; i++) {
-      if (cur[i] || cand[i].length !== 1) continue;
-      const v = cand[i][0], src = new Set(); let other = false;
-      for (let w = 1; w <= 9; w++) { if (w === v) continue; const p = holder(i, w); if (p === undefined) other = true; else src.add(p); }
-      return { cell: i, digit: v, src, ask: 'Press H again to place it.',
-        text: cellName(i) + ' can only be a ' + v + ': every other digit is already used by a cell it sees (highlighted)' + (other ? ' or is excluded by the variant rules' : '') + '.' };
+      if (B.g[i] || bits(B.c[i]) !== 1) continue;
+      const v = digs(B.c[i])[0], src = new Set(); let other = false;
+      for (let w = 1; w <= 9; w++) { if (w === v) continue; const p = PEERS[i].find(q => B.g[q] === w) ?? (nonConsec ? NB[i].find(q => B.g[q] && Math.abs(B.g[q] - w) === 1) : undefined); if (p === undefined) other = true; else src.add(p); }
+      return mk({ cell: i, digit: v, src, base: B.c.slice(),
+        text: cellName(i) + ' can only be a ' + v + ': every other digit is already used by a cell it sees (highlighted)' + (other ? ', or is excluded by your notes or the variant rules' : '') + '.' });
     }
+    return null;
+  }
+  function innieOutieHint(B) {
+    const io = innieOutie(B.g, B.c);
+    if (!io) return null;
+    const [i, v, info] = io, name = UNAME(UNITS.indexOf(info.u));
+    return mk({ cell: i, digit: v, src: new Set(), base: B.c.slice(),
+      text: info.kind === 'innie'
+        ? name[0].toUpperCase() + name.slice(1) + ' adds up to 45 and the cages lying completely inside it add up to ' + info.inside + '. That leaves ' + cellName(i) + ', which must be a ' + v + ' (after the digits already placed there).'
+        : 'The cages that touch ' + name + ' add up to ' + info.total + ', but ' + name + ' itself adds up to 45. The extra ' + (info.total - 45) + ' sits in the cell sticking out of it: ' + cellName(i) + ' must be a ' + v + '.' });
+  }
+  function cageHint(B) {
+    if (!cages) return null;
+    for (const cg of cages) {
+      const r = cageInfo(cg, B.c, B.g);
+      if (r.bad || !r.empty) continue;
+      const strike = new Map();
+      for (const i of cg.cells) if (!B.g[i] && (B.c[i] & ~r.allowed)) strike.set(i, B.c[i] & ~r.allowed);
+      if (!strike.size) continue;
+      const combos2 = cg.masks.filter(m => (m & r.have) === r.have && (m & ~r.have & ~r.union) === 0).map(m => digs(m).join('+'));
+      const gone = new Set(); strike.forEach(m => digs(m).forEach(d => gone.add(d)));
+      return elim(B, 'The ' + cg.cells.length + '-cell cage with sum ' + cg.sum + ' can only be made from ' + combos2.slice(0, 6).join(', ') + (combos2.length > 6 ? ', …' : '') +
+        (r.have ? ' (counting the digits already in it)' : '') + '. So ' + [...gone].join(', ') + ' cannot go in ' + [...strike.keys()].map(rc).join(', ') + ' (marked).', cg.cells, strike);
+    }
+    return null;
+  }
+  function dotHint(B) {
+    if (!dots) return null;
+    for (let i = 0; i < 81; i++) {
+      if (B.g[i]) continue;
+      const removed = B.c[i] & ~dotMask(i, B.c, B.g);
+      if (!removed) continue;
+      const v = digs(removed)[0];
+      for (const j of NB[i]) {
+        const e = edgeT(i, j), cj = B.g[j] ? BIT(B.g[j]) : B.c[j];
+        let any = false;
+        for (let w = 1; w <= 9; w++) if (w !== v && (cj & BIT(w)) && dotOK(v, w, e)) { any = true; break; }
+        if (any) continue;
+        const what = e === 1 ? 'The white dot (consecutive digits)' : e === 2 ? 'The black dot (one is double the other)' : 'There is no dot (so not consecutive and not double)';
+        return elim(B, what + ' between ' + rc(i) + ' and ' + rc(j) + ': ' + rc(j) + ' can only be ' + digs(cj).join(' or ') + ', so ' + rc(i) + ' cannot be a ' + v + '.', [j], new Map([[i, BIT(v)]]));
+      }
+    }
+    return null;
+  }
+  function nakedSetHint(B) {
+    for (let t = 0; t < 27; t++) {
+      const u = UNITS[t], e = u.filter(k => !B.g[k]);
+      for (let a = 0; a < e.length; a++) for (let b = a + 1; b < e.length; b++) {
+        const m2 = B.c[e[a]] | B.c[e[b]];
+        const tryIt = (sub, m, word) => {
+          if (bits(m) !== sub.length) return null;
+          const strike = new Map();
+          e.forEach(k => { if (!sub.includes(k) && (B.c[k] & m)) strike.set(k, B.c[k] & m); });
+          return elim(B, sub.map(rc).join(', ') + ' are the only cells in ' + UNAME(t) + ' that can hold ' + digs(m).join(', ') + ' between them (a naked ' + word + '). So those digits cannot go anywhere else in ' + UNAME(t) + ' (marked).', sub, strike);
+        };
+        const h2 = tryIt([e[a], e[b]], m2, 'pair'); if (h2) return h2;
+        for (let d = b + 1; d < e.length; d++) { const h3 = tryIt([e[a], e[b], e[d]], m2 | B.c[e[d]], 'triple'); if (h3) return h3; }
+      }
+    }
+    return null;
+  }
+  function lockedHint(B) {
+    for (let t = 0; t < 27; t++) for (let d = 1; d <= 9; d++) {
+      const u = UNITS[t], cs = havingD(B, u, d);
+      if (cs.length < 2 || u.some(k => B.g[k] === d)) continue;
+      for (let w = 0; w < 27; w++) {
+        if (w === t || !cs.every(k => UNITS[w].includes(k))) continue;
+        const strike = new Map();
+        UNITS[w].forEach(k => { if (!u.includes(k) && !B.g[k] && (B.c[k] & BIT(d))) strike.set(k, BIT(d)); });
+        const h = elim(B, 'In ' + UNAME(t) + ' the ' + d + ' can only go in ' + cs.map(rc).join(' or ') + ', which are all in ' + UNAME(w) + '. So no other cell of ' + UNAME(w) + ' can hold a ' + d + ' (marked).', cs, strike);
+        if (h) return h;
+      }
+    }
+    return null;
+  }
+  function hiddenPairHint(B) {
+    for (let t = 0; t < 27; t++) for (let v1 = 1; v1 <= 9; v1++) for (let v2 = v1 + 1; v2 <= 9; v2++) {
+      const u = UNITS[t], a = havingD(B, u, v1), b = havingD(B, u, v2);
+      if (a.length !== 2 || b.length !== 2 || a[0] !== b[0] || a[1] !== b[1]) continue;
+      const strike = new Map();
+      a.forEach(k => { const x = B.c[k] & ~(BIT(v1) | BIT(v2)); if (x) strike.set(k, x); });
+      const h = elim(B, 'In ' + UNAME(t) + ' the digits ' + v1 + ' and ' + v2 + ' can only go in ' + rc(a[0]) + ' and ' + rc(a[1]) + ' (a hidden pair). So those two cells can hold nothing else: the other digits go (marked).', a, strike);
+      if (h) return h;
+    }
+    return null;
+  }
+  function xwingHint(B) {
+    for (let t = 0; t < 2; t++) for (let v = 1; v <= 9; v++) {
+      const ls = [];
+      for (let k = 0; k < 9; k++) { const cs = havingD(B, UNITS[3 * k + t], v); if (cs.length === 2) ls.push([k, cs.map(i => t ? row(i) : col(i)), cs]); }
+      for (let a = 0; a < ls.length; a++) for (let b = a + 1; b < ls.length; b++) {
+        if (ls[a][1][0] !== ls[b][1][0] || ls[a][1][1] !== ls[b][1][1]) continue;
+        const strike = new Map();
+        for (const p of ls[a][1]) UNITS[3 * p + 1 - t].forEach(i => {
+          const q = t ? col(i) : row(i);
+          if (q !== ls[a][0] && q !== ls[b][0] && !B.g[i] && (B.c[i] & BIT(v))) strike.set(i, BIT(v));
+        });
+        const lines = t ? 'columns' : 'rows', cross = t ? 'rows' : 'columns';
+        const h = elim(B, 'In ' + lines + ' ' + (ls[a][0] + 1) + ' and ' + (ls[b][0] + 1) + ' the ' + v + ' has only two places each, and they line up in the same two ' + cross + ' (' + (ls[a][1][0] + 1) + ' and ' + (ls[a][1][1] + 1) +
+          ', an X-Wing). So the ' + v + ' must sit in two opposite corners, and every other ' + v + ' in those ' + cross + ' can go (marked).', [...ls[a][2], ...ls[b][2]], strike);
+        if (h) return h;
+      }
+    }
+    return null;
+  }
+
+  // "What if": put digit v in cell i and follow what is forced, one step at a time, until the grid breaks.
+  function runChain(g0, c0, i, v) {
+    const g = g0.slice(), c = c0.slice(), steps = [], cells = [i];
+    let broke = null;
+    if (!assign(g, c, i, v)) return { steps, cells, g, c, broke: 'it clashes with another ' + v };
+    for (let guard = 0; guard < 150 && !broke; guard++) {
+      let moved = false;
+      for (let j = 0; j < 81 && !moved && !broke; j++) {
+        if (g[j]) continue;
+        if (!c[j]) { broke = rc(j) + ' would have no digit left'; break; }
+        if (!(c[j] & (c[j] - 1))) {
+          const d = 31 - Math.clz32(c[j]);
+          steps.push(rc(j) + ' must be ' + d); cells.push(j);
+          if (!assign(g, c, j, d)) broke = 'two ' + d + 's would clash'; moved = true;
+        }
+      }
+      if (moved || broke) continue;
+      for (let t = 0; t < 27 && !moved && !broke; t++) {
+        const u = UNITS[t];
+        for (let d = 1; d <= 9; d++) {
+          if (u.some(k => g[k] === d)) continue;
+          const cs = u.filter(k => !g[k] && (c[k] & BIT(d)));
+          if (!cs.length) { broke = 'the ' + d + ' would have no place left in ' + UNAME(t); break; }
+          if (cs.length === 1) {
+            steps.push(rc(cs[0]) + ' must be ' + d + ' (only place in ' + UNAME(t) + ')'); cells.push(cs[0]);
+            if (!assign(g, c, cs[0], d)) broke = 'two ' + d + 's would clash'; moved = true; break;
+          }
+        }
+      }
+      if (moved || broke) continue;
+      const r = refine(c, g);
+      if (r < 0) { broke = 'a cage sum or a dot can no longer be satisfied'; continue; }
+      if (r) { steps.push('the cage and dot rules strike further digits'); moved = true; }
+    }
+    return { steps, cells, g, c, broke };
+  }
+  const chainText = r => (r.steps.length ? r.steps.slice(0, 6).join('; ') + (r.steps.length > 6 ? '; … (' + (r.steps.length - 6) + ' more steps)' : '') + '. Then ' : '') + r.broke;
+  function trialHint(B) {
+    const t0 = Date.now();
+    let best = null;
+    for (let i = 0; i < 81; i++) {
+      if (B.g[i] || bits(B.c[i]) > 3) continue;
+      for (const v of digs(B.c[i])) {
+        const r = runChain(B.g, B.c, i, v);
+        if (r.broke && (!best || r.steps.length < best.r.steps.length)) best = { i, v, r };
+      }
+    }
+    if (best) return elim(B, 'If ' + rc(best.i) + ' were a ' + best.v + ': ' + chainText(best.r) + '. That is impossible, so ' + rc(best.i) + ' cannot be a ' + best.v + '.', best.r.cells, new Map([[best.i, BIT(best.v)]]));
+    let deep = null;
+    for (let i = 0; i < 81 && Date.now() - t0 < 6000; i++) {
+      if (B.g[i] || bits(B.c[i]) > 3) continue;
+      for (const v of digs(B.c[i])) {
+        const r1 = runChain(B.g, B.c, i, v);
+        if (r1.broke) continue;
+        for (let j = 0; j < 81; j++) {
+          if (r1.g[j] || bits(r1.c[j]) !== 2) continue;
+          const [x, y] = digs(r1.c[j]), rx = runChain(r1.g, r1.c, j, x), ry = runChain(r1.g, r1.c, j, y);
+          if (rx.broke && ry.broke) {
+            const total = r1.steps.length + rx.steps.length + ry.steps.length;
+            if (!deep || total < deep.total) deep = { i, v, j, x, y, r1, rx, ry, total };
+          }
+        }
+      }
+    }
+    if (deep) {
+      const d = deep;
+      return elim(B, 'If ' + rc(d.i) + ' were a ' + d.v + ': ' + (d.r1.steps.length ? d.r1.steps.slice(0, 6).join('; ') + '. ' : '') + 'Now ' + rc(d.j) + ' can only be ' + d.x + ' or ' + d.y + '. If ' + rc(d.j) + ' = ' + d.x + ': ' + chainText(d.rx) + '. If ' + rc(d.j) + ' = ' + d.y + ': ' + chainText(d.ry) +
+        '. Both fail, so ' + rc(d.i) + ' cannot be a ' + d.v + '.', [...d.r1.cells, d.j, ...d.rx.cells, ...d.ry.cells], new Map([[d.i, BIT(d.v)]]));
+    }
+    return null;
+  }
+
+  function findHint() {
+    const bad = [...Array(81).keys()].find(i => !given[i] && cur[i] && cur[i] !== sol[i]);
+    if (bad !== undefined) return mk({ kind: 'mistake', cell: bad, ask: 'Press H again to clear it.',
+      text: 'Mistake: ' + cellName(bad) + ' holds a ' + cur[bad] + ' that does not belong there. Remove it before going on.' });
+    const B = hintBoard();
+    if (B.lost >= 0) return mk({ kind: 'notes', cell: B.lost, base: B.c.slice(), ask: 'Press H again to rebuild them.',
+      text: 'Check your notes: ' + cellName(B.lost) + ' no longer contains the right digit.' });
+    const h = hiddenSingleHint(B) || nakedSingleHint(B) || innieOutieHint(B) || cageHint(B) || dotHint(B) || nakedSetHint(B) || lockedHint(B) ||
+      hiddenPairHint(B) || xwingHint(B) || trialHint(B);
+    if (h) return h;
     const open = [...Array(81).keys()].filter(i => !given[i] && !cur[i]);
     if (!open.length) return null;
     const i = open[rnd(open.length)];
-    return { cell: i, digit: sol[i], src: new Set(), ask: 'Press H again to place it.',
-      text: 'No simple deduction is left (this needs a more advanced technique or a guess). From the solution: ' + cellName(i) + ' is a ' + sol[i] + '.' };
+    return mk({ cell: i, digit: sol[i], base: B.c.slice(),
+      text: 'None of the techniques I know, not even chains of "what if", finds a move here. From the solution: ' + cellName(i) + ' is a ' + sol[i] + '.' });
   }
+  let thinking = false;
   function giveHint() {
-    if (won) return;
+    if (won || thinking) return;
     if (hintState) { applyHint(); return; }          // second press carries the hint out
-    const h = findHint();
-    if (!h) return;
-    hintState = h; sel = h.cell; multi = new Set([h.cell]);
-    msgEl.className = 'hint'; msgEl.textContent = h.text + ' ' + h.ask;
-    render();
+    thinking = true;
+    msgEl.className = 'hint'; msgEl.textContent = 'Thinking…';
+    setTimeout(() => {
+      thinking = false;
+      const h = findHint();
+      if (!h) { msgEl.textContent = ''; return; }
+      hintState = h; sel = h.cell; multi = new Set([h.cell]); hintCount++;
+      msgEl.textContent = h.text + ' ' + h.ask;
+      render();
+    }, 20);
   }
   function applyHint() {
     const h = hintState; hintState = null;
     const before = snapshot();
-    if (h.digit) { place(h.cell, h.digit); prune([h.cell]); } else notes[h.cell].clear();
+    if (h.kind === 'elim') {
+      const start = [];
+      h.strike.forEach((mask, cell) => {
+        const keep = notes[cell].size >= 2 ? new Set(notes[cell]) : new Set(digs(h.base[cell]));
+        digs(mask).forEach(d => keep.delete(d));
+        if (keep.size) notes[cell] = keep;
+        start.push(cell);
+      });
+      derive(); prune(start.filter(i => cur[i]));
+    } else if (h.kind === 'notes') notes[h.cell] = new Set(digs(h.base[h.cell]));
+    else if (h.digit) { place(h.cell, h.digit); prune([h.cell]); }
+    else notes[h.cell].clear();
     msgEl.className = ''; msgEl.textContent = '';
     commit(before); render(); checkWin();
   }
