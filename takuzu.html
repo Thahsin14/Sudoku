@@ -25,6 +25,7 @@ button:hover:not(:disabled),select:hover{border-color:var(--thick)}
 button:disabled{opacity:.4;cursor:default}
 :focus-visible{outline:3px solid var(--user);outline-offset:1px}
 #theme{padding:4px 8px;font-size:.85rem}
+.hc{flex:none;align-self:center;color:var(--muted);font-size:.9rem;padding:0 4px;white-space:nowrap}
 .bar,.tools{display:flex;gap:8px;margin-bottom:12px}
 .bar{flex-wrap:wrap}
 .bar>*,.tools>*{flex:1;min-width:0}
@@ -82,6 +83,7 @@ button:disabled{opacity:.4;cursor:default}
     <button id="undo" title="Undo (Backspace or Ctrl+Z)">Undo</button>
     <button id="redo" title="Redo (Ctrl+Y)">Redo</button>
     <button id="hint" title="Hint (H); press again to place it">Hint</button>
+    <span id="hintCount" class="hc">Hints: 0</span>
   </div>
   <p id="msg" role="status"></p>
 </main>
@@ -89,7 +91,7 @@ button:disabled{opacity:.4;cursor:default}
 (() => {
   const $ = id => document.getElementById(id);
   const boardEl = $('board'), msgEl = $('msg'), timerEl = $('timer');
-  let n = 8, variant = 'classic', signs = null, hintState = null, sol, given, cur, undo = [], redo = [], sel = -1, secs = 0, tick = null, won = false;
+  let n = 8, variant = 'classic', signs = null, hintState = null, hintCount = 0, sol, given, cur, undo = [], redo = [], sel = -1, secs = 0, tick = null, won = false;
   const rnd = k => Math.floor(Math.random() * k);
   const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = rnd(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 
@@ -269,6 +271,7 @@ button:disabled{opacity:.4;cursor:default}
     $('signs').innerHTML = html;
     $('rule').textContent = RULE + (signs ? ' A = between two cells means they are equal, a \u00d7 means they are different.' : '');
     $('undo').disabled = !undo.length; $('redo').disabled = !redo.length;
+    $('hintCount').textContent = 'Hints: ' + hintCount;
     save();
   }
   function change(i, v) {
@@ -283,7 +286,7 @@ button:disabled{opacity:.4;cursor:default}
   function checkWin() {
     if (cur.every(v => v >= 0) && errors(cur).size === 0) {
       won = true; clearInterval(tick);
-      msgEl.textContent = 'Solved in ' + fmt(secs) + '.'; msgEl.className = 'win';
+      msgEl.textContent = 'Solved in ' + fmt(secs) + (hintCount ? ' with ' + hintCount + (hintCount === 1 ? ' hint' : ' hints') : ' without hints') + '.'; msgEl.className = 'win';
       localStorage.removeItem('takuzu');
     }
   }
@@ -339,7 +342,7 @@ button:disabled{opacity:.4;cursor:default}
     if (hintState) { const h = hintState; hintState = null; msgEl.className = ''; msgEl.textContent = ''; change(h.cell, h.digit); return; }
     const h = findHint();
     if (!h) return;
-    hintState = h; sel = h.cell;
+    hintState = h; sel = h.cell; hintCount++;
     msgEl.className = 'hint'; msgEl.textContent = h.text + ' ' + h.ask;
     render();
   }
@@ -350,7 +353,7 @@ button:disabled{opacity:.4;cursor:default}
   }
   function save() {
     if (won) return;
-    try { localStorage.setItem('takuzu', JSON.stringify({ n, sol, given, cur, secs, level: $('level').value, variant, signs })); } catch (e) {}
+    try { localStorage.setItem('takuzu', JSON.stringify({ n, sol, given, cur, secs, level: $('level').value, variant, signs, hints: hintCount })); } catch (e) {}
   }
   function newGame() {
     msgEl.className = ''; msgEl.textContent = 'Generating…';
@@ -358,7 +361,7 @@ button:disabled{opacity:.4;cursor:default}
       n = +$('size').value; variant = $('variant').value;
       const { sol: s, g } = makePuzzle(+$('level').value);
       sol = s; cur = g.slice(); given = g.map(v => v >= 0);
-      undo = []; redo = []; sel = -1; secs = 0; won = false; hintState = null;
+      undo = []; redo = []; sel = -1; secs = 0; won = false; hintState = null; hintCount = 0;
       build(); msgEl.textContent = ''; render(); startTimer();
     }, 20);
   }
@@ -416,7 +419,7 @@ button:disabled{opacity:.4;cursor:default}
     const d = JSON.parse(localStorage.getItem('takuzu'));
     if (d && d.cur && d.cur.length === d.n * d.n) {
       ({ n, sol, given, cur, secs } = d);
-      variant = d.variant || 'classic'; signs = d.signs || null;
+      variant = d.variant || 'classic'; signs = d.signs || null; hintCount = d.hints || 0;
       $('size').value = n; $('level').value = d.level; $('variant').value = variant;
       build(); render(); startTimer(); return;
     }
